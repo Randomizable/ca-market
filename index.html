@@ -197,7 +197,7 @@ const SKINS_DB = [
 // Extended accounts with profile data
 const INIT_PROFILES = {
   AdminUser: {
-    password:"@dm1n#CAMarket!26", joinedDaysAgo:365, role:"admin",
+    joinedDaysAgo:365, role:\"admin\",
     avatarColor:4, avatarEmoji:"🛡️",
     bio:"Site administrator. Maintaining fair values and a healthy community.",
     robloxUsername:"CombatArenaAdmin", discordName:"Admin#0000",
@@ -751,16 +751,8 @@ function AuthModal({ onLogin, onClose }) {
     setError(""); setLoading(true);
     try {
       if (mode === "login") {
-        // Allow admin to log in with username/password directly (no email needed)
-        if (user === "AdminUser") {
-          const adminProfile = { username:"AdminUser", role:"admin", avatarColor:4, avatarEmoji:"🛡️",
-            bio:"Site administrator.", robloxUsername:"", discordName:"", favoriteWeapon:"",
-            totalSubmissions:0, reputation:100, badge:"Admin", joinedDaysAgo:365 };
-          if (pass === "@dm1n#CAMarket!26") { onLogin(adminProfile); return; }
-          else { setError("Wrong password."); return; }
-        }
         const { data, error: err } = await supabase.auth.signInWithPassword({ email, password: pass });
-        if (err) { setError(err.message); return; }
+        if (err) { setError("Incorrect email or password."); return; }
         const { data: profile } = await supabase.from("profiles").select("*").eq("id", data.user.id).single();
         if (profile) onLogin(normaliseProfile(profile));
       } else {
@@ -829,7 +821,7 @@ function AuthModal({ onLogin, onClose }) {
             <input style={inp} placeholder="Username" value={user} onChange={e=>{setUser(e.target.value);setError("");}} onKeyDown={e=>e.key==="Enter"&&handle()}/>
           )}
           {mode==="login" ? (
-            <input style={inp} placeholder="Username or Email" value={email||user} onChange={e=>{setEmail(e.target.value);setUser(e.target.value);setError("");}} onKeyDown={e=>e.key==="Enter"&&handle()}/>
+            <input style={inp} placeholder="Email address" value={email} onChange={e=>{setEmail(e.target.value);setError("");}} onKeyDown={e=>e.key==="Enter"&&handle()}/>
           ) : (
             <input style={inp} placeholder="Email address" value={email} onChange={e=>{setEmail(e.target.value);setError("");}} onKeyDown={e=>e.key==="Enter"&&handle()}/>
           )}
@@ -2656,9 +2648,12 @@ function ComingSoonPage({ onBypass }) {
     if (next >= 5) { setShowBypass(true); setClickCount(0); }
   };
 
-  const handleBypass = () => {
-    if (pass === "@dm1n#CAMarket!26") { onBypass(); }
-    else { setError("Incorrect."); setTimeout(() => setError(""), 2000); }
+  const handleBypass = async () => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email: pass, password: pass });
+    if (error) { setError("Not authorised."); setTimeout(() => setError(""), 2000); return; }
+    const { data: profile } = await supabase.from("profiles").select("role").eq("id", data.user.id).single();
+    if (profile?.role === "admin") onBypass();
+    else { setError("Admin access only."); setTimeout(() => setError(""), 2000); }
   };
 
   const fade = (delay=0) => ({
@@ -2725,7 +2720,7 @@ function ComingSoonPage({ onBypass }) {
             <div style={{fontSize:12,color:"#444",fontWeight:600,marginBottom:14,letterSpacing:"0.05em",textTransform:"uppercase"}}>Admin Access</div>
             <input type="password" value={pass} onChange={e=>setPass(e.target.value)}
               onKeyDown={e=>e.key==="Enter"&&handleBypass()}
-              autoFocus placeholder="Password"
+              autoFocus placeholder="Admin email"
               style={{width:"100%",background:"#0e0e0e",border:"1px solid #252525",borderRadius:10,color:"#e0e0e0",fontFamily:"inherit",fontSize:13,padding:"10px 14px",outline:"none",marginBottom:10,boxSizing:"border-box"}}/>
             {error && <div style={{fontSize:12,color:"#f87171",marginBottom:10}}>{error}</div>}
             <button onClick={handleBypass}
@@ -2754,9 +2749,12 @@ function MaintenancePage({ onBypass }) {
     if (next >= 5) { setShowBypass(true); setClickCount(0); }
   };
 
-  const handleBypass = () => {
-    if (pass === "@dm1n#CAMarket!26") { onBypass(); }
-    else { setError("Incorrect."); setTimeout(() => setError(""), 2000); }
+  const handleBypass = async () => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email: pass, password: pass });
+    if (error) { setError("Not authorised."); setTimeout(() => setError(""), 2000); return; }
+    const { data: profile } = await supabase.from("profiles").select("role").eq("id", data.user.id).single();
+    if (profile?.role === "admin") onBypass();
+    else { setError("Admin access only."); setTimeout(() => setError(""), 2000); }
   };
 
   const fade = (delay=0) => ({
@@ -2808,7 +2806,7 @@ function MaintenancePage({ onBypass }) {
             <div style={{fontSize:12,color:"#444",fontWeight:600,marginBottom:14,letterSpacing:"0.05em",textTransform:"uppercase"}}>Admin Access</div>
             <input type="password" value={pass} onChange={e=>setPass(e.target.value)}
               onKeyDown={e=>e.key==="Enter"&&handleBypass()}
-              autoFocus placeholder="Password"
+              autoFocus placeholder="Admin email"
               style={{width:"100%",background:"#0e0e0e",border:"1px solid #252525",borderRadius:10,color:"#e0e0e0",fontFamily:"inherit",fontSize:13,padding:"10px 14px",outline:"none",marginBottom:10,boxSizing:"border-box"}}/>
             {error && <div style={{fontSize:12,color:"#f87171",marginBottom:10}}>{error}</div>}
             <button onClick={handleBypass}
