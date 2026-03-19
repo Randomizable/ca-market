@@ -5718,13 +5718,15 @@ function LiveChat({ currentUser, profiles, messages, setMessages }) {
   const [gifLoading, setGifLoading] = useState(false);
   const [showReactFor, setShowReactFor] = useState(null);
   const [hoveredUser, setHoveredUser]   = useState(null);
-  const bottomRef  = useRef(null);
+  const messagesRef = useRef(null);
   const inputRef   = useRef(null);
   const hoverTimer = useRef(null);
 
-  // Auto-scroll to bottom on new messages
+  // Auto-scroll to bottom on new messages — scroll the container, not the page
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior:"smooth" });
+    if (messagesRef.current) {
+      messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+    }
   }, [messages]);
 
   // GIF search
@@ -5856,7 +5858,7 @@ function LiveChat({ currentUser, profiles, messages, setMessages }) {
       </div>
 
       {/* Messages */}
-      <div style={{flex:1,overflowY:"auto",padding:"10px 10px 4px",display:"flex",flexDirection:"column",gap:1,scrollbarWidth:"thin",scrollbarColor:"#222 transparent"}}>
+      <div ref={messagesRef} style={{flex:1,overflowY:"auto",padding:"10px 10px 4px",display:"flex",flexDirection:"column",gap:1,scrollbarWidth:"thin",scrollbarColor:"#222 transparent"}}>
         {messages.map(m => {
           const prof = profiles[m.user];
           const role = prof?.role ?? "community";
@@ -5923,7 +5925,7 @@ function LiveChat({ currentUser, profiles, messages, setMessages }) {
             </div>
           );
         })}
-        <div ref={bottomRef}/>
+
       </div>
 
       {/* GIF picker */}
