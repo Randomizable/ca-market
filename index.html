@@ -6737,6 +6737,19 @@ function App() {
         setProfiles(prev => ({ ...prev, ...mapped }));
       }
     });
+
+    // Real-time: pick up new registrations and profile updates instantly
+    const channel = supabase.channel("profiles_realtime")
+      .on("postgres_changes", { event:"INSERT", schema:"public", table:"profiles" }, payload => {
+        const norm = normaliseProfile(payload.new);
+        if (norm) setProfiles(prev => ({ ...prev, [norm.username]: norm }));
+      })
+      .on("postgres_changes", { event:"UPDATE", schema:"public", table:"profiles" }, payload => {
+        const norm = normaliseProfile(payload.new);
+        if (norm) setProfiles(prev => ({ ...prev, [norm.username]: { ...prev[norm.username], ...norm } }));
+      })
+      .subscribe();
+    return () => supabase.removeChannel(channel);
   }, []);
 
   // ── Load submissions from Supabase ──
