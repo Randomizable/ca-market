@@ -775,11 +775,28 @@ function AuthModal({ onLogin, onClose }) {
           options: { data: { username: user.trim() } }
         });
         if (err) { setError(err.message); return; }
-        // Wait briefly for trigger to create profile, then fetch it
-        await new Promise(r => setTimeout(r, 800));
-        const { data: profile } = await supabase.from("profiles").select("*").eq("id", data.user.id).single();
-        if (profile) onLogin(normaliseProfile(profile));
-        else onLogin({ username: user.trim(), role:"community", avatarColor:0, avatarEmoji:"🎮",
+        if (!data.user) { setError("Signup failed. Please try again."); return; }
+        // Manually insert profile (more reliable than trigger)
+        const { error: profileErr } = await supabase.from("profiles").upsert({
+          id: data.user.id,
+          username: user.trim(),
+          role: "community",
+          avatar_emoji: "🎮",
+          avatar_color: 0,
+          bio: "",
+          roblox_username: "",
+          discord_name: "",
+          favorite_weapon: "",
+          reputation: 10,
+          total_submissions: 0,
+          badge: null,
+        });
+        if (profileErr && profileErr.code !== "23505") {
+          // 23505 = unique violation (profile already exists from trigger) — that's fine
+          setError("Account created but profile setup failed. Please try logging in.");
+          return;
+        }
+        onLogin({ username: user.trim(), role:"community", avatarColor:0, avatarEmoji:"🎮",
           bio:"", robloxUsername:"", discordName:"", favoriteWeapon:"",
           totalSubmissions:0, reputation:10, badge:null, joinedDaysAgo:0 });
       }
