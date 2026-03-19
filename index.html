@@ -83,6 +83,28 @@ const CONFIDENCE_META = [
 ];
 const TAG_COLOR = { Market:"#f97316", Guide:"#4ade80", Prediction:"#a855f7", Discussion:"#60a5fa", Trading:"#fbbf24" };
 const fmt = n => n?.toLocaleString() ?? "—";
+// Sanitise HTML from rich text editor — strips scripts and dangerous attributes
+function sanitiseHTML(html) {
+  if (!html) return "";
+  // Remove script tags and their content
+  let s = html.replace(/<script[\s\S]*?<\/script>/gi, "");
+  // Remove event handlers and javascript: hrefs
+  s = s.replace(/\s(on\w+|href|src|action|formaction|data)\s*=\s*["'][^"']*["']/gi, (m) => {
+    const attr = m.trim().split("=")[0].toLowerCase();
+    if (attr === "href" || attr === "src") {
+      // Allow safe hrefs/srcs, block javascript:
+      if (/javascript:/i.test(m)) return "";
+      return m;
+    }
+    return "";
+  });
+  // Remove dangerous tags entirely
+  s = s.replace(/<(iframe|object|embed|form|input|button|meta|link|style|base)[^>]*>/gi, "");
+  // Remove data: URIs from src attributes
+  s = s.replace(/src\s*=\s*["']data:[^"']*["']/gi, "");
+  return s;
+}
+
 function timeAgo(ts) {
   const s = Math.floor((Date.now() - new Date(ts)) / 1000);
   if (s < 60)   return "just now";
@@ -567,7 +589,7 @@ function ProfilePage({ username, profiles, submissions, allSkins, isOwn, onBack,
             </div>
 
             {editing ? (
-              <textarea value={draft.bio} onChange={e=>setDraft(d=>({...d,bio:e.target.value}))} rows={3}
+              <textarea value={draft.bio} onChange={e=>setDraft(d=>({...d,bio:e.target.value.slice(0,500)}))} rows={3}
                 placeholder="Write a short bio…"
                 style={{...inp,resize:"none",marginBottom:10,width:"100%"}}/>
             ) : (
@@ -1738,7 +1760,7 @@ function ReplyComposer({ currentUser, onSubmit, profiles }) {
     <div style={{display:"flex",gap:12,alignItems:"flex-start"}}>
       <div style={{flexShrink:0,marginTop:4}}><Avatar profile={profile||currentUser} size={36}/></div>
       <div style={{flex:1}}>
-        <textarea value={text} onChange={e=>setText(e.target.value)} rows={3}
+        <textarea value={text} onChange={e=>setText(e.target.value.slice(0,10000))} rows={3}
           placeholder="Write a reply…" style={inp}
           onFocus={e=>e.target.style.borderColor="#f9731660"}
           onBlur={e=>e.target.style.borderColor="#1e1e1e"}/>
@@ -1904,7 +1926,7 @@ function PostPage({ post, replies, postReactions, replyReactions, currentUser, p
 
         {/* Body */}
         {post.richText
-          ? <div style={{fontSize:14,color:"#aaa",lineHeight:1.85,marginBottom:16}} dangerouslySetInnerHTML={{__html:post.body}}/>
+          ? <div style={{fontSize:14,color:"#aaa",lineHeight:1.85,marginBottom:16}} dangerouslySetInnerHTML={{__html:sanitiseHTML(post.body)}}/>
           : <div style={{fontSize:14,color:"#aaa",lineHeight:1.85,whiteSpace:"pre-line",marginBottom:16}}>{post.body}</div>
         }
 
@@ -1992,7 +2014,13 @@ function RichTextEditor({ value, onChange, placeholder="Write your post body her
   };
 
   const handleInput = () => {
-    if (onChange) onChange(editorRef.current.innerHTML);
+    const html = editorRef.current.innerHTML;
+    if (html.length > 50000) {
+      // Truncate to limit — rare edge case
+      editorRef.current.innerHTML = html.slice(0, 50000);
+      return;
+    }
+    if (onChange) onChange(html);
   };
 
   // Sync initial value
@@ -2201,7 +2229,7 @@ function NewPostPage({ currentUser, profiles, onBack, onSubmit }) {
           {/* Title */}
           <div>
             <div style={{fontSize:11,fontWeight:700,color:"#555",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Post Title *</div>
-            <input value={title} onChange={e=>{setTitle(e.target.value);setErrors(p=>({...p,title:null}));}}
+            <input value={title} onChange={e=>{setTitle(e.target.value.slice(0,300));setErrors(p=>({...p,title:null}));}}
               placeholder="Give your post a clear, descriptive title…"
               style={{...inp,fontSize:16,fontWeight:600,borderColor:errors.title?"#f87171":"#1e1e1e"}}
               onFocus={e=>e.target.style.borderColor=errors.title?"#f87171":"#f9731660"}
@@ -2636,13 +2664,14 @@ function LegendPanel() {
 function ComingSoonPage({ onBypass }) {
   const [clickCount,  setClickCount]  = useState(0);
   const [showBypass,  setShowBypass]  = useState(false);
+  const [email,       setEmail]       = useState("");
   const [pass,        setPass]        = useState("");
   const [error,       setError]       = useState("");
+  const [loading,     setLoading]     = useState(false);
   const [visible,     setVisible]     = useState(false);
 
   useEffect(() => { setTimeout(() => setVisible(true), 60); }, []);
 
-  // Secret: clicking the logo 5 times opens bypass
   const handleLogoClick = () => {
     const next = clickCount + 1;
     setClickCount(next);
@@ -2650,11 +2679,19 @@ function ComingSoonPage({ onBypass }) {
   };
 
   const handleBypass = async () => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email: pass, password: pass });
-    if (error) { setError("Not authorised."); setTimeout(() => setError(""), 2000); return; }
-    const { data: profile } = await supabase.from("profiles").select("role").eq("id", data.user.id).single();
-    if (profile?.role === "admin") onBypass();
-    else { setError("Admin access only."); setTimeout(() => setError(""), 2000); }
+    if (!email || !pass) { setError("Enter your admin email and password."); return; }
+    setLoading(true); setError("");
+    try {
+      const { data, error: authErr } = await supabase.auth.signInWithPassword({ email, password: pass });
+      if (authErr) { setError("Incorrect credentials."); return; }
+      const { data: profile } = await supabase.from("profiles").select("role").eq("id", data.user.id).single();
+      if (profile?.role === "admin") onBypass();
+      else { setError("Admin access only."); await supabase.auth.signOut(); }
+    } catch(e) {
+      setError("Something went wrong.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const fade = (delay=0) => ({
@@ -2715,18 +2752,22 @@ function ComingSoonPage({ onBypass }) {
       {/* Bypass modal */}
       {showBypass && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:600,display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(4px)"}}>
-          <div style={{background:"#111",border:"1px solid #1e1e1e",borderRadius:16,padding:"28px",width:300,position:"relative"}}>
-            <button onClick={()=>{setShowBypass(false);setPass("");setError("");}}
+          <div style={{background:"#111",border:"1px solid #1e1e1e",borderRadius:16,padding:"28px",width:320,position:"relative"}}>
+            <button onClick={()=>{setShowBypass(false);setEmail("");setPass("");setError("");}}
               style={{position:"absolute",top:12,right:12,background:"none",border:"none",color:"#444",cursor:"pointer",fontSize:16}}>✕</button>
             <div style={{fontSize:12,color:"#444",fontWeight:600,marginBottom:14,letterSpacing:"0.05em",textTransform:"uppercase"}}>Admin Access</div>
-            <input type="password" value={pass} onChange={e=>setPass(e.target.value)}
+            <input type="email" value={email} onChange={e=>setEmail(e.target.value)}
               onKeyDown={e=>e.key==="Enter"&&handleBypass()}
               autoFocus placeholder="Admin email"
+              style={{width:"100%",background:"#0e0e0e",border:"1px solid #252525",borderRadius:10,color:"#e0e0e0",fontFamily:"inherit",fontSize:13,padding:"10px 14px",outline:"none",marginBottom:8,boxSizing:"border-box"}}/>
+            <input type="password" value={pass} onChange={e=>setPass(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&handleBypass()}
+              placeholder="Password"
               style={{width:"100%",background:"#0e0e0e",border:"1px solid #252525",borderRadius:10,color:"#e0e0e0",fontFamily:"inherit",fontSize:13,padding:"10px 14px",outline:"none",marginBottom:10,boxSizing:"border-box"}}/>
             {error && <div style={{fontSize:12,color:"#f87171",marginBottom:10}}>{error}</div>}
-            <button onClick={handleBypass}
-              style={{width:"100%",background:"linear-gradient(135deg,#f97316,#c2410c)",border:"none",borderRadius:10,color:"#000",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,padding:"10px 0"}}>
-              Enter
+            <button onClick={handleBypass} disabled={loading}
+              style={{width:"100%",background:loading?"#333":"linear-gradient(135deg,#f97316,#c2410c)",border:"none",borderRadius:10,color:loading?"#666":"#000",cursor:loading?"default":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,padding:"10px 0"}}>
+              {loading ? "Checking…" : "Enter"}
             </button>
           </div>
         </div>
@@ -2738,8 +2779,10 @@ function ComingSoonPage({ onBypass }) {
 function MaintenancePage({ onBypass }) {
   const [clickCount,  setClickCount]  = useState(0);
   const [showBypass,  setShowBypass]  = useState(false);
+  const [email,       setEmail]       = useState("");
   const [pass,        setPass]        = useState("");
   const [error,       setError]       = useState("");
+  const [loading,     setLoading]     = useState(false);
   const [visible,     setVisible]     = useState(false);
 
   useEffect(() => { setTimeout(() => setVisible(true), 60); }, []);
@@ -2751,11 +2794,19 @@ function MaintenancePage({ onBypass }) {
   };
 
   const handleBypass = async () => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email: pass, password: pass });
-    if (error) { setError("Not authorised."); setTimeout(() => setError(""), 2000); return; }
-    const { data: profile } = await supabase.from("profiles").select("role").eq("id", data.user.id).single();
-    if (profile?.role === "admin") onBypass();
-    else { setError("Admin access only."); setTimeout(() => setError(""), 2000); }
+    if (!email || !pass) { setError("Enter your admin email and password."); return; }
+    setLoading(true); setError("");
+    try {
+      const { data, error: authErr } = await supabase.auth.signInWithPassword({ email, password: pass });
+      if (authErr) { setError("Incorrect credentials."); return; }
+      const { data: profile } = await supabase.from("profiles").select("role").eq("id", data.user.id).single();
+      if (profile?.role === "admin") onBypass();
+      else { setError("Admin access only."); await supabase.auth.signOut(); }
+    } catch(e) {
+      setError("Something went wrong.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const fade = (delay=0) => ({
@@ -2801,18 +2852,22 @@ function MaintenancePage({ onBypass }) {
       {/* Bypass modal — same as coming soon */}
       {showBypass && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:600,display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(4px)"}}>
-          <div style={{background:"#111",border:"1px solid #1e1e1e",borderRadius:16,padding:"28px",width:300,position:"relative"}}>
-            <button onClick={()=>{setShowBypass(false);setPass("");setError("");}}
+          <div style={{background:"#111",border:"1px solid #1e1e1e",borderRadius:16,padding:"28px",width:320,position:"relative"}}>
+            <button onClick={()=>{setShowBypass(false);setEmail("");setPass("");setError("");}}
               style={{position:"absolute",top:12,right:12,background:"none",border:"none",color:"#444",cursor:"pointer",fontSize:16}}>✕</button>
             <div style={{fontSize:12,color:"#444",fontWeight:600,marginBottom:14,letterSpacing:"0.05em",textTransform:"uppercase"}}>Admin Access</div>
-            <input type="password" value={pass} onChange={e=>setPass(e.target.value)}
+            <input type="email" value={email} onChange={e=>setEmail(e.target.value)}
               onKeyDown={e=>e.key==="Enter"&&handleBypass()}
               autoFocus placeholder="Admin email"
+              style={{width:"100%",background:"#0e0e0e",border:"1px solid #252525",borderRadius:10,color:"#e0e0e0",fontFamily:"inherit",fontSize:13,padding:"10px 14px",outline:"none",marginBottom:8,boxSizing:"border-box"}}/>
+            <input type="password" value={pass} onChange={e=>setPass(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&handleBypass()}
+              placeholder="Password"
               style={{width:"100%",background:"#0e0e0e",border:"1px solid #252525",borderRadius:10,color:"#e0e0e0",fontFamily:"inherit",fontSize:13,padding:"10px 14px",outline:"none",marginBottom:10,boxSizing:"border-box"}}/>
             {error && <div style={{fontSize:12,color:"#f87171",marginBottom:10}}>{error}</div>}
-            <button onClick={handleBypass}
-              style={{width:"100%",background:"linear-gradient(135deg,#f97316,#c2410c)",border:"none",borderRadius:10,color:"#000",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,padding:"10px 0"}}>
-              Enter
+            <button onClick={handleBypass} disabled={loading}
+              style={{width:"100%",background:loading?"#333":"linear-gradient(135deg,#f97316,#c2410c)",border:"none",borderRadius:10,color:loading?"#666":"#000",cursor:loading?"default":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,padding:"10px 0"}}>
+              {loading ? "Checking…" : "Enter"}
             </button>
           </div>
         </div>
@@ -3495,7 +3550,7 @@ function ScammerPage({ currentUser, confirmedScammers, onSubmitReport, onShowAut
 
               <div style={{marginBottom:14}}>
                 <div style={{fontSize:12,color:"#888",fontWeight:600,marginBottom:6}}>Description <span style={{color:"#f87171"}}>*</span></div>
-                <textarea value={description} onChange={e=>setDescription(e.target.value)}
+                <textarea value={description} onChange={e=>setDescription(e.target.value.slice(0,5000))}
                   placeholder="Describe what happened in detail — what was traded, what was promised, what went wrong. The more detail the better."
                   rows={5} style={{...inp,resize:"vertical",lineHeight:1.6}}/>
                 <div style={{fontSize:11,color:description.length<20?"#f87171":"#555",marginTop:4,textAlign:"right"}}>{description.length} chars {description.length<20?`(${20-description.length} more needed)`:""}</div>
@@ -6660,7 +6715,7 @@ function App() {
       user_id: (await supabase.auth.getUser()).data.user?.id,
       username: post.user,
       title: post.title,
-      body: post.body,
+      body: sanitiseHTML(post.body),
       tag: post.tag,
       rich_text: post.richText || false,
       poll: post.poll || null,
