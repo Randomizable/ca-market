@@ -7325,21 +7325,33 @@ function App() {
             {(()=>{
               const p = profiles[currentUser.username];
               const colors = AVATAR_COLORS[p?.avatarColor ?? 0] ?? AVATAR_COLORS[0];
+              const roleColor = currentUser.role==="admin"?"#f87171":currentUser.role==="trader"?"#f97316":"#9ca3af";
               return (
-                <div style={{position:"relative"}}>
-                  <button onClick={()=>setShowProfileCard(v=>!v)}
-                    style={{background:`linear-gradient(135deg,${colors[0]},${colors[1]})`,border:"none",borderRadius:10,cursor:"pointer",width:38,height:38,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>
-                    {p?.avatarEmoji||"🎮"}
+                <div style={{position:"relative"}}
+                  onMouseEnter={()=>setShowProfileCard(true)}
+                  onMouseLeave={()=>setShowProfileCard(false)}>
+                  <button onClick={()=>{navigate("profile");setShowProfileCard(false);}}
+                    style={{display:"flex",alignItems:"center",gap:8,background:"#111",border:"1px solid #1e1e1e",borderRadius:12,cursor:"pointer",padding:"6px 12px 6px 6px",transition:"border-color 0.15s",flexShrink:0}}
+                    onMouseEnter={e=>e.currentTarget.style.borderColor="#f9731640"}
+                    onMouseLeave={e=>e.currentTarget.style.borderColor="#1e1e1e"}>
+                    <div style={{width:28,height:28,background:`linear-gradient(135deg,${colors[0]},${colors[1]})`,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>
+                      {p?.avatarEmoji||"🎮"}
+                    </div>
+                    <div style={{textAlign:"left"}}>
+                      <div style={{fontSize:12,fontWeight:700,color:"#e0e0e0",lineHeight:1.2}}>{currentUser.username}</div>
+                      <div style={{fontSize:10,color:roleColor,fontWeight:600,lineHeight:1.2}}>{currentUser.role==="admin"?"Admin":currentUser.role==="trader"?"Trusted Trader":"Member"}</div>
+                    </div>
                   </button>
                   {showProfileCard && (()=>{
                     const pending = traderRequests.find(r=>r.username===currentUser.username&&r.status==="pending");
                     return (
-                      <div style={{position:"absolute",top:"calc(100% + 10px)",right:0,width:220,background:"#141414",border:"1px solid #252525",borderRadius:16,zIndex:300,boxShadow:"0 16px 48px rgba(0,0,0,0.6)",padding:16,display:"flex",flexDirection:"column",gap:8}}>
-                        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
-                          <div style={{width:40,height:40,background:`linear-gradient(135deg,${colors[0]},${colors[1]})`,borderRadius:11,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>{p?.avatarEmoji||"🎮"}</div>
+                      <div style={{position:"absolute",top:"calc(100% + 8px)",right:0,width:240,background:"#141414",border:"1px solid #252525",borderRadius:16,zIndex:300,boxShadow:"0 16px 48px rgba(0,0,0,0.6)",padding:16,display:"flex",flexDirection:"column",gap:8}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4,paddingBottom:12,borderBottom:"1px solid #1e1e1e"}}>
+                          <div style={{width:44,height:44,background:`linear-gradient(135deg,${colors[0]},${colors[1]})`,borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>{p?.avatarEmoji||"🎮"}</div>
                           <div>
                             <div style={{fontWeight:700,fontSize:14,color:"#e0e0e0"}}>{currentUser.username}</div>
-                            <div style={{fontSize:11,color:"#555"}}>{currentUser.role==="admin"?"Admin":currentUser.role==="trader"?"Trusted Trader":"Community"}</div>
+                            <div style={{fontSize:11,color:roleColor,fontWeight:600}}>{currentUser.role==="admin"?"Admin":currentUser.role==="trader"?"Trusted Trader":"Community"}</div>
+                            <div style={{fontSize:11,color:"#555",marginTop:1}}>Rep {p?.reputation ?? 0}</div>
                           </div>
                         </div>
                         <button onClick={()=>{navigate("profile");setShowProfileCard(false);}} style={{width:"100%",background:"#1a1a1a",border:"1px solid #252525",borderRadius:10,color:"#e0e0e0",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,padding:"8px 0"}}>👤 View Profile</button>
