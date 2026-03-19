@@ -4431,28 +4431,69 @@ function AdminPage({ allSkins, submissions, setSubmissions, bracketSubs, setBrac
   );
 
   return (
-    <div style={{maxWidth:900,margin:"0 auto"}}>
-      {/* Header */}
-      <div style={{marginBottom:24}}>
-        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
-          <span style={{fontSize:20}}>🛡️</span>
-          <span style={{fontFamily:"Syne,sans-serif",fontSize:22,fontWeight:800,color:"#fff"}}>Admin Panel</span>
-          <span style={{background:"rgba(248,113,113,0.12)",border:"1px solid rgba(248,113,113,0.3)",borderRadius:99,fontSize:10,fontWeight:700,color:"#f87171",padding:"2px 10px"}}>AdminUser</span>
-        </div>
-        <div style={{fontSize:12,color:"#555"}}>Moderation tools for pricing integrity and community safety.</div>
-      </div>
+    <div style={{maxWidth:1100,margin:"0 auto"}}>
+      <div style={{display:"flex",gap:20,alignItems:"flex-start"}}>
 
-      {/* Section nav */}
-      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:20}}>
-        {SECTIONS.map(s=>(
-          <button key={s.id} onClick={()=>setActiveSection(s.id)}
-            style={{background:activeSection===s.id?"#1e1e1e":"transparent",border:`1px solid ${activeSection===s.id?"#333":"#1e1e1e"}`,borderRadius:10,color:activeSection===s.id?"#f0f0f0":"#555",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,padding:"7px 14px",display:"flex",alignItems:"center",gap:6,transition:"all 0.15s"}}>
-            <span>{s.emoji}</span>
-            {s.label}
-            {s.badge!=null&&s.badge>0&&<span style={{background:s.badgeColor,borderRadius:99,color:"#000",fontSize:10,fontWeight:800,minWidth:16,height:16,display:"inline-flex",alignItems:"center",justifyContent:"center",padding:"0 4px"}}>{s.badge}</span>}
-          </button>
-        ))}
-      </div>
+        {/* ── SIDEBAR ── */}
+        <div style={{width:220,flexShrink:0,position:"sticky",top:88}}>
+          {/* Header */}
+          <div style={{background:"#111",border:"1px solid #1e1e1e",borderRadius:16,padding:"16px",marginBottom:12}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+              <div style={{width:32,height:32,background:"linear-gradient(135deg,#f87171,#dc2626)",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15}}>🛡️</div>
+              <div>
+                <div style={{fontFamily:"Syne,sans-serif",fontSize:14,fontWeight:800,color:"#fff",lineHeight:1.1}}>Admin Panel</div>
+                <div style={{fontSize:10,color:"#f87171",fontWeight:600}}>AdminUser</div>
+              </div>
+            </div>
+            <div style={{fontSize:10,color:"#444",lineHeight:1.5}}>Moderation &amp; site management</div>
+          </div>
+
+          {/* Nav groups */}
+          {[
+            { label:"Overview", items: SECTIONS.filter(s=>["sitemode","announce"].includes(s.id)) },
+            { label:"Moderation", items: SECTIONS.filter(s=>["submissions","commvotes","disputes","reports","scamreports"].includes(s.id)) },
+            { label:"Community", items: SECTIONS.filter(s=>["traderrequests","users","suspicious","traders"].includes(s.id)) },
+            { label:"Analytics", items: SECTIONS.filter(s=>["spikes","market"].includes(s.id)) },
+            { label:"System",   items: SECTIONS.filter(s=>["log"].includes(s.id)) },
+          ].map(group => (
+            <div key={group.label} style={{marginBottom:8}}>
+              <div style={{fontSize:9,fontWeight:700,color:"#333",textTransform:"uppercase",letterSpacing:"0.08em",padding:"0 4px 6px"}}>{group.label}</div>
+              <div style={{background:"#111",border:"1px solid #1e1e1e",borderRadius:12,overflow:"hidden"}}>
+                {group.items.map((s, i) => {
+                  const active = activeSection === s.id;
+                  return (
+                    <button key={s.id} onClick={()=>setActiveSection(s.id)}
+                      style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"9px 12px",background:active?"rgba(249,115,22,0.08)":"transparent",border:"none",borderBottom:i<group.items.length-1?"1px solid #1a1a1a":"none",color:active?"#f97316":"#666",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:active?700:500,textAlign:"left",transition:"all 0.12s",position:"relative"}}
+                      onMouseEnter={e=>{if(!active)e.currentTarget.style.background="#1a1a1a";}}
+                      onMouseLeave={e=>{if(!active)e.currentTarget.style.background="transparent";}}>
+                      {active && <div style={{position:"absolute",left:0,top:"20%",bottom:"20%",width:2,background:"#f97316",borderRadius:1}}/>}
+                      <span style={{fontSize:14,flexShrink:0}}>{s.emoji}</span>
+                      <span style={{flex:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{s.label}</span>
+                      {s.badge!=null&&s.badge>0&&(
+                        <span style={{background:s.badgeColor,borderRadius:99,color:"#000",fontSize:9,fontWeight:800,minWidth:15,height:15,display:"inline-flex",alignItems:"center",justifyContent:"center",padding:"0 4px",flexShrink:0}}>{s.badge}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* ── MAIN CONTENT ── */}
+        <div style={{flex:1,minWidth:0}}>
+          {/* Section title */}
+          <div style={{marginBottom:20}}>
+            {(()=>{const s=SECTIONS.find(x=>x.id===activeSection);return s?(
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:22}}>{s.emoji}</span>
+                <div>
+                  <div style={{fontFamily:"Syne,sans-serif",fontSize:18,fontWeight:800,color:"#fff"}}>{s.label}</div>
+                </div>
+                {s.badge!=null&&s.badge>0&&<span style={{background:s.badgeColor,borderRadius:99,color:"#000",fontSize:11,fontWeight:800,padding:"2px 10px",marginLeft:4}}>{s.badge}</span>}
+              </div>
+            ):null;})()}
+          </div>
 
       {/* ── PENDING SUBMISSIONS ── */}
       {activeSection==="submissions" && (
@@ -5338,11 +5379,13 @@ function AdminPage({ allSkins, submissions, setSubmissions, bracketSubs, setBrac
           ))}
         </div>
       )}
+        </div>
+        {/* end main content */}
+      </div>
+      {/* end sidebar layout */}
     </div>
   );
-}
-
-const CHAT_EMOJIS = ["🔥","💯","😂","😮","👍","❤️","🚀","💀"];
+} = ["🔥","💯","😂","😮","👍","❤️","🚀","💀"];
 const CHAR_LIMIT = 255;
 
 // Demo data for submission feed simulation
@@ -7326,11 +7369,14 @@ function App() {
               const p = profiles[currentUser.username];
               const colors = AVATAR_COLORS[p?.avatarColor ?? 0] ?? AVATAR_COLORS[0];
               const roleColor = currentUser.role==="admin"?"#f87171":currentUser.role==="trader"?"#f97316":"#9ca3af";
+              const userPosts = forumPosts.filter(fp=>fp.user===currentUser.username).length;
+              const userSubs  = Object.values(submissions).flat().filter(s=>s.traderId===currentUser.username).length;
+              const repColor  = (p?.reputation??0)>=90?"#4ade80":(p?.reputation??0)>=60?"#fbbf24":"#f87171";
               return (
                 <div style={{position:"relative"}}
                   onMouseEnter={()=>setShowProfileCard(true)}
                   onMouseLeave={()=>setShowProfileCard(false)}>
-                  <button onClick={()=>{navigate("profile");setShowProfileCard(false);}}
+                  <button onClick={()=>{handleViewProfile(currentUser.username);setShowProfileCard(false);}}
                     style={{display:"flex",alignItems:"center",gap:8,background:"#111",border:"1px solid #1e1e1e",borderRadius:12,cursor:"pointer",padding:"6px 12px 6px 6px",transition:"border-color 0.15s",flexShrink:0}}
                     onMouseEnter={e=>e.currentTarget.style.borderColor="#f9731640"}
                     onMouseLeave={e=>e.currentTarget.style.borderColor="#1e1e1e"}>
@@ -7345,20 +7391,41 @@ function App() {
                   {showProfileCard && (()=>{
                     const pending = traderRequests.find(r=>r.username===currentUser.username&&r.status==="pending");
                     return (
-                      <div style={{position:"absolute",top:"calc(100% + 8px)",right:0,width:240,background:"#141414",border:"1px solid #252525",borderRadius:16,zIndex:300,boxShadow:"0 16px 48px rgba(0,0,0,0.6)",padding:16,display:"flex",flexDirection:"column",gap:8}}>
-                        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4,paddingBottom:12,borderBottom:"1px solid #1e1e1e"}}>
-                          <div style={{width:44,height:44,background:`linear-gradient(135deg,${colors[0]},${colors[1]})`,borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>{p?.avatarEmoji||"🎮"}</div>
+                      <div style={{position:"absolute",top:"calc(100% + 8px)",right:0,width:260,background:"#141414",border:"1px solid #252525",borderRadius:16,zIndex:300,boxShadow:"0 16px 48px rgba(0,0,0,0.6)",padding:16,display:"flex",flexDirection:"column",gap:10}}>
+                        {/* Header */}
+                        <div style={{display:"flex",alignItems:"center",gap:10,paddingBottom:10,borderBottom:"1px solid #1e1e1e"}}>
+                          <div style={{width:46,height:46,background:`linear-gradient(135deg,${colors[0]},${colors[1]})`,borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>{p?.avatarEmoji||"🎮"}</div>
                           <div>
                             <div style={{fontWeight:700,fontSize:14,color:"#e0e0e0"}}>{currentUser.username}</div>
-                            <div style={{fontSize:11,color:roleColor,fontWeight:600}}>{currentUser.role==="admin"?"Admin":currentUser.role==="trader"?"Trusted Trader":"Community"}</div>
-                            <div style={{fontSize:11,color:"#555",marginTop:1}}>Rep {p?.reputation ?? 0}</div>
+                            <div style={{fontSize:11,color:roleColor,fontWeight:600}}>{currentUser.role==="admin"?"Admin":currentUser.role==="trader"?"Trusted Trader":"Community Member"}</div>
+                            {p?.badge&&<div style={{marginTop:3,display:"inline-flex",alignItems:"center",gap:4,background:"rgba(249,115,22,0.1)",border:"1px solid rgba(249,115,22,0.2)",borderRadius:99,padding:"1px 7px"}}><span style={{fontSize:9}}>🏅</span><span style={{fontSize:9,fontWeight:700,color:"#f97316"}}>{p.badge}</span></div>}
                           </div>
                         </div>
-                        <button onClick={()=>{navigate("profile");setShowProfileCard(false);}} style={{width:"100%",background:"#1a1a1a",border:"1px solid #252525",borderRadius:10,color:"#e0e0e0",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,padding:"8px 0"}}>👤 View Profile</button>
+                        {/* Stats grid */}
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+                          {[
+                            { label:"Reputation", val:p?.reputation??0, color:repColor },
+                            { label:"Posts",       val:userPosts,        color:"#60a5fa" },
+                            { label:"Submissions", val:userSubs,         color:"#a855f7" },
+                          ].map(s=>(
+                            <div key={s.label} style={{background:"#111",borderRadius:10,padding:"8px 10px",textAlign:"center"}}>
+                              <div style={{fontSize:15,fontWeight:800,color:s.color}}>{s.val}</div>
+                              <div style={{fontSize:9,color:"#444",textTransform:"uppercase",letterSpacing:"0.05em",marginTop:2}}>{s.label}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {/* Member since */}
+                        <div style={{fontSize:11,color:"#444",textAlign:"center"}}>
+                          Member for <span style={{color:"#666",fontWeight:600}}>{getJoinedDaysAgo(currentUser)} days</span>
+                          {p?.favoriteWeapon && <span> · Fav: <span style={{color:"#666",fontWeight:600}}>{p.favoriteWeapon}</span></span>}
+                        </div>
+                        {p?.bio && <div style={{fontSize:11,color:"#555",lineHeight:1.5,borderTop:"1px solid #1e1e1e",paddingTop:8,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{p.bio}</div>}
+                        {/* Actions */}
+                        <button onClick={()=>{handleViewProfile(currentUser.username);setShowProfileCard(false);}} style={{width:"100%",background:"#1a1a1a",border:"1px solid #252525",borderRadius:10,color:"#e0e0e0",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,padding:"8px 0"}}>👤 View Full Profile</button>
                         {currentUser.role==="community" && (
                           <button onClick={()=>{handleRequestTrader();setShowProfileCard(false);}} disabled={!!pending}
                             style={{width:"100%",background:pending?"rgba(168,85,247,0.08)":"rgba(168,85,247,0.1)",border:`1px solid ${pending?"rgba(168,85,247,0.2)":"rgba(168,85,247,0.35)"}`,borderRadius:10,color:pending?"#7c3aed":"#a855f7",cursor:pending?"default":"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700,padding:"8px 0",opacity:pending?0.7:1}}>
-                            {pending ? "⏳ Application Pending" : "⭐ Request Trusted Trader"}
+                            {pending?"⏳ Application Pending":"⭐ Request Trusted Trader"}
                           </button>
                         )}
                         <button onClick={()=>{navigate("settings");setShowProfileCard(false);}} style={{width:"100%",background:"linear-gradient(135deg,#f97316,#c2410c)",border:"none",borderRadius:10,color:"#000",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700,padding:"8px 0"}}>⚙️ Settings</button>
@@ -7419,7 +7486,7 @@ function App() {
           <div style={{height:1,background:"#1a1a1a",margin:"4px 0"}}/>
           {currentUser ? (
             <>
-              <button onClick={()=>{navigate("profile");setMobileMenuOpen(false);}} style={{background:"transparent",border:"1px solid #1e1e1e",borderRadius:12,color:"#888",cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:600,padding:"12px 16px",textAlign:"left"}}>👤 My Profile</button>
+              <button onClick={()=>{handleViewProfile(currentUser.username);setMobileMenuOpen(false);}} style={{background:"transparent",border:"1px solid #1e1e1e",borderRadius:12,color:"#888",cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:600,padding:"12px 16px",textAlign:"left"}}>👤 My Profile</button>
               <button onClick={()=>{navigate("settings");setMobileMenuOpen(false);}} style={{background:"transparent",border:"1px solid #1e1e1e",borderRadius:12,color:"#888",cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:600,padding:"12px 16px",textAlign:"left"}}>⚙️ Settings</button>
               <button onClick={async()=>{await supabase.auth.signOut();setCurrentUser(null);setMobileMenuOpen(false);}} style={{background:"transparent",border:"1px solid #1e1e1e",borderRadius:12,color:"#555",cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:600,padding:"12px 16px",textAlign:"left"}}>🚪 Log Out</button>
             </>
