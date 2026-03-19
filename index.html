@@ -90,6 +90,25 @@ function timeAgo(ts) {
   if (s < 86400) return `${Math.floor(s/3600)}h ago`;
   return `${Math.floor(s/86400)}d ago`;
 }
+
+// Converts Supabase snake_case profile to camelCase used throughout the app
+function normaliseProfile(p) {
+  if (!p) return null;
+  return {
+    username:        p.username,
+    role:            p.role            ?? "community",
+    avatarEmoji:     p.avatarEmoji     ?? p.avatar_emoji    ?? "🎮",
+    avatarColor:     p.avatarColor     ?? p.avatar_color    ?? 0,
+    bio:             p.bio             ?? "",
+    robloxUsername:  p.robloxUsername  ?? p.roblox_username ?? "",
+    discordName:     p.discordName     ?? p.discord_name    ?? "",
+    favoriteWeapon:  p.favoriteWeapon  ?? p.favorite_weapon ?? "",
+    reputation:      p.reputation      ?? 10,
+    totalSubmissions:p.totalSubmissions?? p.total_submissions ?? 0,
+    badge:           p.badge           ?? null,
+    joinedDaysAgo:   p.joinedDaysAgo   ?? (p.joined_at ? Math.floor((Date.now() - new Date(p.joined_at)) / 86400000) : 0),
+  };
+}
 // skinLabel: "Galaxy | FAMAS" — used on cards and in search
 const skinLabel    = s => s.specificWeapon ? `${s.name} | ${s.specificWeapon}` : s.name;
 // skinSubLabel: "FAMAS · AR" — used as subtitle
@@ -743,7 +762,7 @@ function AuthModal({ onLogin, onClose }) {
         const { data, error: err } = await supabase.auth.signInWithPassword({ email, password: pass });
         if (err) { setError(err.message); return; }
         const { data: profile } = await supabase.from("profiles").select("*").eq("id", data.user.id).single();
-        if (profile) onLogin({ ...profile, joinedDaysAgo: Math.floor((Date.now() - new Date(profile.joined_at)) / 86400000) });
+        if (profile) onLogin(normaliseProfile(profile));
       } else {
         if (user.trim().length < 3) { setError("Username must be 3+ characters."); return; }
         if (!email.includes("@"))   { setError("Please enter a valid email."); return; }
@@ -759,7 +778,7 @@ function AuthModal({ onLogin, onClose }) {
         // Wait briefly for trigger to create profile, then fetch it
         await new Promise(r => setTimeout(r, 800));
         const { data: profile } = await supabase.from("profiles").select("*").eq("id", data.user.id).single();
-        if (profile) onLogin({ ...profile, joinedDaysAgo: 0 });
+        if (profile) onLogin(normaliseProfile(profile));
         else onLogin({ username: user.trim(), role:"community", avatarColor:0, avatarEmoji:"🎮",
           bio:"", robloxUsername:"", discordName:"", favoriteWeapon:"",
           totalSubmissions:0, reputation:10, badge:null, joinedDaysAgo:0 });
@@ -6112,8 +6131,8 @@ function App() {
         supabase.from("profiles").select("*").eq("id", session.user.id).single()
           .then(({ data: profile }) => {
             if (profile) {
-              const acc = { ...profile, joinedDaysAgo: Math.floor((Date.now() - new Date(profile.joined_at)) / 86400000) };
-              setProfiles(prev => ({ ...prev, [profile.username]: acc }));
+              const acc = normaliseProfile(profile);
+              setProfiles(prev => ({ ...prev, [acc.username]: acc }));
               setCurrentUser(acc);
             }
           });
@@ -6126,9 +6145,7 @@ function App() {
     supabase.from("profiles").select("*").then(({ data }) => {
       if (data) {
         const mapped = {};
-        data.forEach(p => {
-          mapped[p.username] = { ...p, joinedDaysAgo: Math.floor((Date.now() - new Date(p.joined_at)) / 86400000) };
-        });
+        data.forEach(p => { const norm = normaliseProfile(p); mapped[norm.username] = norm; });
         setProfiles(prev => ({ ...prev, ...mapped }));
       }
     });
