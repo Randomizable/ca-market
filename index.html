@@ -5748,8 +5748,6 @@ function LiveChat({ currentUser, profiles, messages, setMessages }) {
   const send = async () => {
     const text = input.trim();
     if (!text || !currentUser) return;
-    const msg = { id:`cm${Date.now()}`, user:currentUser.username, text, time:nowTime(), reactions:{} };
-    setMessages(prev => [...prev, msg]);
     setInput("");
     const userId = (await supabase.auth.getUser()).data.user?.id;
     if (userId) await supabase.from("chat_messages").insert({ user_id:userId, username:currentUser.username, text });
@@ -7266,7 +7264,6 @@ function App() {
   }, [currentUser, replies, forumPosts]);
 
   const handleNewPost = useCallback(async post => {
-    // Persist to Supabase
     const { data: saved, error } = await supabase.from("forum_posts").insert({
       user_id: (await supabase.auth.getUser()).data.user?.id,
       username: post.user,
@@ -7276,8 +7273,9 @@ function App() {
       rich_text: post.richText || false,
       poll: post.poll || null,
     }).select().single();
+    // Don't add to forumPosts locally — real-time subscription handles it
+    // But we still need to navigate to the new post immediately
     const finalPost = saved ? { ...post, id: saved.id, _created: saved.created_at } : post;
-    setForumPosts(prev => [finalPost, ...prev]);
     setActivePost(finalPost);
     setNewPostOpen(false);
     window.scrollTo({top:0,behavior:"smooth"});
