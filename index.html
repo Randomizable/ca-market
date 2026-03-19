@@ -7,6 +7,7 @@
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone@7.23.0/babel.min.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <!-- Recharts needs prop-types as a peer dep in UMD mode -->
   <script src="https://unpkg.com/prop-types@15.8.1/prop-types.js"></script>
   <script src="https://unpkg.com/recharts@2.8.0/umd/Recharts.js"></script>
@@ -82,6 +83,13 @@ const CONFIDENCE_META = [
 ];
 const TAG_COLOR = { Market:"#f97316", Guide:"#4ade80", Prediction:"#a855f7", Discussion:"#60a5fa", Trading:"#fbbf24" };
 const fmt = n => n?.toLocaleString() ?? "—";
+function timeAgo(ts) {
+  const s = Math.floor((Date.now() - new Date(ts)) / 1000);
+  if (s < 60)   return "just now";
+  if (s < 3600)  return `${Math.floor(s/60)}m ago`;
+  if (s < 86400) return `${Math.floor(s/3600)}h ago`;
+  return `${Math.floor(s/86400)}d ago`;
+}
 // skinLabel: "Galaxy | FAMAS" — used on cards and in search
 const skinLabel    = s => s.specificWeapon ? `${s.name} | ${s.specificWeapon}` : s.name;
 // skinSubLabel: "FAMAS · AR" — used as subtitle
@@ -208,6 +216,13 @@ function isOutlier(value, subs) {
   const avg = valid.reduce((a,s)=>a+s.value,0)/valid.length;
   return Math.abs(value-avg)/avg > 0.20;
 }
+// ─────────────────────────────────────────────────────────────
+//  SUPABASE CLIENT
+// ─────────────────────────────────────────────────────────────
+const SUPABASE_URL  = "https://zsdkajecvfnwemdesthf.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpzZGthamVjdmZud2VtZGVzdGhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4OTMzNTcsImV4cCI6MjA4OTQ2OTM1N30.WTWJcANSRrDFD7WpMuNS1eDI5XCLogAWzgAueHC2a40";
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
 const WEEK_MS = 7*24*60*60*1000;
 const MIN_VOTES = 5;      // minimum votes before result is valid
 const MIN_REP   = 30;     // minimum reputation to vote
@@ -705,29 +720,60 @@ function ProfilePage({ username, profiles, submissions, allSkins, isOwn, onBack,
 //  AUTH MODAL
 // ─────────────────────────────────────────────────────────────
 function AuthModal({ onLogin, onClose }) {
-  const [user,setUser]   = useState("");
-  const [pass,setPass]   = useState("");
-  const [error,setError] = useState("");
-  const [mode,setMode]   = useState("login");
+  const [user,    setUser]    = useState("");
+  const [email,   setEmail]   = useState("");
+  const [pass,    setPass]    = useState("");
+  const [error,   setError]   = useState("");
+  const [loading, setLoading] = useState(false);
+  const [mode,    setMode]    = useState("login");
   const inp = {background:"#111",border:"1px solid #252525",borderRadius:10,color:"#e0e0e0",fontFamily:"inherit",fontSize:14,fontWeight:500,padding:"10px 14px",outline:"none",width:"100%"};
-  const handle = () => {
-    if (mode==="login") {
-      const acc = INIT_PROFILES[user];
-      if (!acc) { setError("Account not found."); return; }
-      if (acc.password!==pass) { setError("Wrong password."); return; }
-      onLogin({ username:user, ...acc });
-    } else {
-      if (user.trim().length<3) { setError("Username must be 3+ characters."); return; }
-      if (pass.length<6)        { setError("Password must be 6+ characters."); return; }
-      onLogin({ username:user, password:pass, joinedDaysAgo:0, role:"community",
-        avatarColor:Math.floor(Math.random()*AVATAR_COLORS.length), avatarEmoji:"🎮",
-        bio:"", robloxUsername:"", discordName:"", favoriteWeapon:"",
-        totalSubmissions:0, reputation:10, badge:null });
+
+  const handle = async () => {
+    setError(""); setLoading(true);
+    try {
+      if (mode === "login") {
+        // Allow admin to log in with username/password directly (no email needed)
+        if (user === "AdminUser") {
+          const adminProfile = { username:"AdminUser", role:"admin", avatarColor:4, avatarEmoji:"🛡️",
+            bio:"Site administrator.", robloxUsername:"", discordName:"", favoriteWeapon:"",
+            totalSubmissions:0, reputation:100, badge:"Admin", joinedDaysAgo:365 };
+          if (pass === "@dm1n#CAMarket!26") { onLogin(adminProfile); return; }
+          else { setError("Wrong password."); return; }
+        }
+        const { data, error: err } = await supabase.auth.signInWithPassword({ email, password: pass });
+        if (err) { setError(err.message); return; }
+        const { data: profile } = await supabase.from("profiles").select("*").eq("id", data.user.id).single();
+        if (profile) onLogin({ ...profile, joinedDaysAgo: Math.floor((Date.now() - new Date(profile.joined_at)) / 86400000) });
+      } else {
+        if (user.trim().length < 3) { setError("Username must be 3+ characters."); return; }
+        if (!email.includes("@"))   { setError("Please enter a valid email."); return; }
+        if (pass.length < 6)        { setError("Password must be 6+ characters."); return; }
+        // Check username not taken
+        const { data: existing } = await supabase.from("profiles").select("id").eq("username", user.trim()).single();
+        if (existing) { setError("Username already taken."); return; }
+        const { data, error: err } = await supabase.auth.signUp({
+          email, password: pass,
+          options: { data: { username: user.trim() } }
+        });
+        if (err) { setError(err.message); return; }
+        // Wait briefly for trigger to create profile, then fetch it
+        await new Promise(r => setTimeout(r, 800));
+        const { data: profile } = await supabase.from("profiles").select("*").eq("id", data.user.id).single();
+        if (profile) onLogin({ ...profile, joinedDaysAgo: 0 });
+        else onLogin({ username: user.trim(), role:"community", avatarColor:0, avatarEmoji:"🎮",
+          bio:"", robloxUsername:"", discordName:"", favoriteWeapon:"",
+          totalSubmissions:0, reputation:10, badge:null, joinedDaysAgo:0 });
+      }
+    } catch(e) {
+      setError("Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
     }
   };
+
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(4px)"}}>
-      <div style={{background:"#141414",border:"1px solid #252525",borderRadius:20,padding:"32px",width:360,position:"relative"}}>
+      <div style={{background:"#141414",border:"1px solid #252525",borderRadius:20,padding:"32px",width:380,position:"relative"}}>
         <button onClick={onClose} style={{position:"absolute",top:16,right:16,background:"none",border:"none",color:"#555",cursor:"pointer",fontSize:18}}>✕</button>
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
           <div style={{width:36,height:36,background:"linear-gradient(135deg,#f97316,#c2410c)",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17}}>⚔</div>
@@ -737,17 +783,27 @@ function AuthModal({ onLogin, onClose }) {
           </div>
         </div>
         <div style={{marginBottom:20}}/>
-
         <div style={{display:"flex",background:"#111",borderRadius:12,padding:3,marginBottom:24}}>
           {["login","register"].map(m=>(
             <button key={m} onClick={()=>{setMode(m);setError("");}} style={{flex:1,background:mode===m?"#1e1e1e":"transparent",border:"none",borderRadius:9,color:mode===m?"#f97316":"#666",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,padding:"7px 0",textTransform:"capitalize"}}>{m==="login"?"Log In":"Register"}</button>
           ))}
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          <input style={inp} placeholder="Username" value={user} onChange={e=>{setUser(e.target.value);setError("");}} onKeyDown={e=>e.key==="Enter"&&handle()}/>
+          {mode==="register" && (
+            <input style={inp} placeholder="Username" value={user} onChange={e=>{setUser(e.target.value);setError("");}} onKeyDown={e=>e.key==="Enter"&&handle()}/>
+          )}
+          {mode==="login" ? (
+            <input style={inp} placeholder="Username or Email" value={email||user} onChange={e=>{setEmail(e.target.value);setUser(e.target.value);setError("");}} onKeyDown={e=>e.key==="Enter"&&handle()}/>
+          ) : (
+            <input style={inp} placeholder="Email address" value={email} onChange={e=>{setEmail(e.target.value);setError("");}} onKeyDown={e=>e.key==="Enter"&&handle()}/>
+          )}
           <input style={inp} placeholder="Password" type="password" value={pass} onChange={e=>{setPass(e.target.value);setError("");}} onKeyDown={e=>e.key==="Enter"&&handle()}/>
-          {error&&<div style={{fontSize:12,color:"#f87171",padding:"4px 0"}}>⚠ {error}</div>}
-          <button onClick={handle} style={{background:"linear-gradient(135deg,#f97316,#c2410c)",border:"none",borderRadius:10,color:"#000",cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700,padding:"11px",marginTop:4}}>{mode==="login"?"Log In":"Create Account"}</button>
+          {error && <div style={{fontSize:12,color:"#f87171",padding:"4px 0"}}>⚠ {error}</div>}
+          <button onClick={handle} disabled={loading}
+            style={{background:loading?"#333":"linear-gradient(135deg,#f97316,#c2410c)",border:"none",borderRadius:10,color:loading?"#666":"#000",cursor:loading?"default":"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700,padding:"11px",marginTop:4}}>
+            {loading ? "Please wait…" : mode==="login" ? "Log In" : "Create Account"}
+          </button>
+          {mode==="register" && <div style={{fontSize:11,color:"#444",textAlign:"center",lineHeight:1.5}}>By registering you agree to our Terms of Service. You must be 13+ to join.</div>}
         </div>
       </div>
     </div>
@@ -6049,6 +6105,97 @@ function App() {
 
   const allSkins = useMemo(()=>buildSkins(submissions,votes,frozen,bracketSubs),[submissions,votes,frozen,bracketSubs]);
 
+  // ── Restore Supabase session on mount ──
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        supabase.from("profiles").select("*").eq("id", session.user.id).single()
+          .then(({ data: profile }) => {
+            if (profile) {
+              const acc = { ...profile, joinedDaysAgo: Math.floor((Date.now() - new Date(profile.joined_at)) / 86400000) };
+              setProfiles(prev => ({ ...prev, [profile.username]: acc }));
+              setCurrentUser(acc);
+            }
+          });
+      }
+    });
+  }, []);
+
+  // ── Load all profiles from Supabase ──
+  useEffect(() => {
+    supabase.from("profiles").select("*").then(({ data }) => {
+      if (data) {
+        const mapped = {};
+        data.forEach(p => {
+          mapped[p.username] = { ...p, joinedDaysAgo: Math.floor((Date.now() - new Date(p.joined_at)) / 86400000) };
+        });
+        setProfiles(prev => ({ ...prev, ...mapped }));
+      }
+    });
+  }, []);
+
+  // ── Load submissions from Supabase ──
+  useEffect(() => {
+    supabase.from("submissions").select("*").then(({ data }) => {
+      if (!data) return;
+      const grouped = {};
+      data.forEach(s => {
+        if (!grouped[s.skin_id]) grouped[s.skin_id] = [];
+        grouped[s.skin_id].push({ traderId: s.trader_id, value: s.value, submittedAt: s.submitted_at, flagged: s.flagged, _id: s.id });
+      });
+      setSubmissions(grouped);
+    });
+    supabase.from("bracket_submissions").select("*").then(({ data }) => {
+      if (!data) return;
+      const grouped = {};
+      data.forEach(s => {
+        if (!grouped[s.skin_id]) grouped[s.skin_id] = {};
+        if (!grouped[s.skin_id][s.bracket_id]) grouped[s.skin_id][s.bracket_id] = [];
+        grouped[s.skin_id][s.bracket_id].push({ traderId: s.trader_id, value: s.value, submittedAt: s.submitted_at, flagged: s.flagged, _id: s.id });
+      });
+      setBracketSubs(grouped);
+    });
+  }, []);
+
+  // ── Load forum posts from Supabase ──
+  useEffect(() => {
+    supabase.from("forum_posts").select("*").order("created_at", { ascending: false }).then(({ data }) => {
+      if (data) {
+        setForumPosts(data.map(p => ({
+          id: p.id, user: p.username, title: p.title, body: p.body,
+          tag: p.tag, pinned: p.pinned, views: p.views, replies: p.reply_count,
+          richText: p.rich_text, poll: p.poll,
+          time: timeAgo(p.created_at), _created: p.created_at,
+        })));
+      }
+    });
+  }, []);
+
+  // ── Load scam data from Supabase ──
+  useEffect(() => {
+    supabase.from("scam_reports").select("*").then(({ data }) => {
+      if (data) setScamReports(data.map(r => ({ id: r.id, accusedUsername: r.accused_username, robloxUsername: r.roblox_username, discordUsername: r.discord_username, description: r.description, photos: r.photo_urls||[], reportedBy: r.reported_by, time: timeAgo(r.created_at), status: r.status })));
+    });
+    supabase.from("confirmed_scammers").select("*").then(({ data }) => {
+      if (data) setConfirmedScammers(data.map(s => ({ id: s.id, username: s.username, robloxUsername: s.roblox_username, discordUsername: s.discord_username, description: s.description, photos: s.photo_urls||[], reportedBy: s.reported_by, confirmedAt: new Date(s.confirmed_at).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}) })));
+    });
+  }, []);
+
+  // ── Real-time: new forum posts ──
+  useEffect(() => {
+    const channel = supabase.channel("forum_posts_realtime")
+      .on("postgres_changes", { event:"INSERT", schema:"public", table:"forum_posts" }, payload => {
+        const p = payload.new;
+        setForumPosts(prev => [{
+          id: p.id, user: p.username, title: p.title, body: p.body,
+          tag: p.tag, pinned: p.pinned, views: p.views, replies: p.reply_count,
+          richText: p.rich_text, poll: p.poll, time: "just now", _created: p.created_at,
+        }, ...prev]);
+      })
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  }, []);
+
   // Close notifications panel on outside click
   useEffect(() => {
     if (!showNotifications) return;
@@ -6088,26 +6235,26 @@ function App() {
     setNotifications(prev => prev.filter(n => n.id !== id));
   }, []);
 
-  const handleLogin = useCallback(acc=>{
-    // Merge into profiles if new user
-    setProfiles(prev=>{
-      if (!prev[acc.username]) {
-        const { username, ...rest } = acc;
-        return { ...prev, [username]: rest };
-      }
-      return prev;
-    });
+  const handleLogin = useCallback(acc => {
+    setProfiles(prev => ({ ...prev, [acc.username]: acc }));
     setCurrentUser(acc);
     setShowAuth(false);
     if (authRedirect) { setTab(authRedirect); setAuthRedirect(null); }
-  },[authRedirect]);
+  }, [authRedirect]);
 
-  const handleSaveProfile = useCallback((username, data)=>{
-    setProfiles(prev=>({...prev,[username]:{...prev[username],...data}}));
-    if (currentUser?.username===username) {
-      setCurrentUser(prev=>({...prev,...data}));
+  const handleSaveProfile = useCallback(async (username, data) => {
+    setProfiles(prev => ({ ...prev, [username]: { ...prev[username], ...data } }));
+    if (currentUser?.username === username) setCurrentUser(prev => ({ ...prev, ...data }));
+    // Persist to Supabase
+    const { data: profile } = await supabase.from("profiles").select("id").eq("username", username).single();
+    if (profile) {
+      await supabase.from("profiles").update({
+        avatar_emoji: data.avatarEmoji, avatar_color: data.avatarColor,
+        bio: data.bio, roblox_username: data.robloxUsername,
+        discord_name: data.discordName, favorite_weapon: data.favoriteWeapon,
+      }).eq("id", profile.id);
     }
-  },[currentUser]);
+  }, [currentUser]);
 
   const handleVote = useCallback((skinId,dir)=>{
     const w=voteWeight(currentUser?.joinedDaysAgo??0);
@@ -6118,40 +6265,36 @@ function App() {
     });
   },[currentUser]);
 
-  const handleSubmit = useCallback((skinId, value, note, flagged) => {
+  const handleSubmit = useCallback(async (skinId, value, note, flagged) => {
     if (!currentUser || (currentUser.role !== "trader" && currentUser.role !== "admin")) return;
     if (frozen[skinId]) return;
     const v = Math.round(Number(value));
     if (!isFinite(v) || v <= 0 || v > 100000000) return;
-    const entry = { traderId:currentUser.username, value:v, submittedAt:new Date().toISOString().split("T")[0], flagged:!!flagged };
+    const today = new Date().toISOString().split("T")[0];
+    const entry = { traderId: currentUser.username, value: v, submittedAt: today, flagged: !!flagged };
+    // Optimistic UI update
     setSubmissions(prev => {
       const updated = { ...prev, [skinId]: [...(prev[skinId]||[]), entry] };
       if (flagged) {
         const subIdx = updated[skinId].length - 1;
         const voteId = `cv_${skinId}_${subIdx}_${Date.now()}`;
         const now = Date.now();
-        setCommunityVotes(cv => ({
-          ...cv,
-          [voteId]: {
-            id: voteId,
-            skinId, bracketId: null, source: "base",
-            subIdx, traderId: currentUser.username,
-            value: v, submittedAt: entry.submittedAt,
-            openedAt: now, expiresAt: now + WEEK_MS,
-            keep: [], reject: [],
-          }
-        }));
+        setCommunityVotes(cv => ({ ...cv, [voteId]: { id:voteId, skinId, bracketId:null, source:"base", subIdx, traderId:currentUser.username, value:v, submittedAt:today, openedAt:now, expiresAt:now+WEEK_MS, keep:[], reject:[] } }));
       }
       return updated;
     });
+    // Persist to Supabase
+    await supabase.from("submissions").insert({ skin_id:skinId, trader_id:currentUser.username, value:v, flagged:!!flagged, submitted_at:today });
   }, [currentUser, frozen]);
 
-  const handleBracketSubmit = useCallback((skinId, bracketId, value, flagged) => {
+  const handleBracketSubmit = useCallback(async (skinId, bracketId, value, flagged) => {
     if (!currentUser || (currentUser.role !== "trader" && currentUser.role !== "admin")) return;
     if (frozen[skinId]) return;
     const v = Math.round(Number(value));
     if (!isFinite(v) || v <= 0 || v > 100000000) return;
-    const entry = { traderId:currentUser.username, value:v, submittedAt:new Date().toISOString().split("T")[0], flagged:!!flagged };
+    const today = new Date().toISOString().split("T")[0];
+    const entry = { traderId: currentUser.username, value: v, submittedAt: today, flagged: !!flagged };
+    // Optimistic UI update
     setBracketSubs(prev => {
       const skinBrackets = prev[skinId] || {};
       const bracketArr   = skinBrackets[bracketId] || [];
@@ -6160,20 +6303,12 @@ function App() {
         const subIdx = updated[skinId][bracketId].length - 1;
         const voteId = `cv_${skinId}_${bracketId}_${subIdx}_${Date.now()}`;
         const now = Date.now();
-        setCommunityVotes(cv => ({
-          ...cv,
-          [voteId]: {
-            id: voteId,
-            skinId, bracketId, source: "bracket",
-            subIdx, traderId: currentUser.username,
-            value: v, submittedAt: entry.submittedAt,
-            openedAt: now, expiresAt: now + WEEK_MS,
-            keep: [], reject: [],
-          }
-        }));
+        setCommunityVotes(cv => ({ ...cv, [voteId]: { id:voteId, skinId, bracketId, source:"bracket", subIdx, traderId:currentUser.username, value:v, submittedAt:today, openedAt:now, expiresAt:now+WEEK_MS, keep:[], reject:[] } }));
       }
       return updated;
     });
+    // Persist to Supabase
+    await supabase.from("bracket_submissions").insert({ skin_id:skinId, bracket_id:bracketId, trader_id:currentUser.username, value:v, flagged:!!flagged, submitted_at:today });
   }, [currentUser, frozen]);
 
   // Cast a community vote on a flagged submission
@@ -6302,7 +6437,7 @@ function App() {
     window.scrollTo({top:0,behavior:"smooth"});
   },[]);
 
-  const handleAddReply = useCallback((postId, {body,image,gif})=>{
+  const handleAddReply = useCallback(async (postId, {body,image,gif}) => {
     const newReply = {
       id:`r${postId}_${Date.now()}`, postId,
       user:currentUser.username, body, image, gif,
@@ -6311,21 +6446,27 @@ function App() {
     setReplies(prev=>({...prev,[postId]:[...(prev[postId]||[]),newReply]}));
     setForumPosts(prev=>prev.map(p=>{
       if (p.id!==postId) return p;
-      // Notify post author if it's not the replier themselves
       if (p.user !== currentUser.username) {
         setNotifications(n=>[{
           id:`notif_reply_${Date.now()}`,
-          type:"reply",
-          fromUser: currentUser.username,
-          postId, postTitle: p.title,
-          preview: body.slice(0,80),
-          time: "just now",
-          read: false,
+          type:"reply", fromUser:currentUser.username,
+          postId, postTitle:p.title,
+          preview:body.slice(0,80),
+          time:"just now", read:false,
         }, ...n]);
       }
       return {...p, replies:p.replies+1};
     }));
-  },[currentUser]);
+    // Persist to Supabase
+    const userId = (await supabase.auth.getUser()).data.user?.id;
+    if (userId) {
+      await supabase.from("forum_replies").insert({
+        post_id: postId, user_id: userId,
+        username: currentUser.username, body,
+        image_url: image || null, gif_url: gif || null,
+      });
+    }
+  }, [currentUser]);
 
   const handleReactPost = useCallback((targetId, emoji)=>{
     if (!currentUser) return;
@@ -6385,12 +6526,23 @@ function App() {
     });
   },[currentUser, replies, forumPosts]);
 
-  const handleNewPost = useCallback(post => {
-    setForumPosts(prev => [post, ...prev]);
-    setActivePost(post);
+  const handleNewPost = useCallback(async post => {
+    // Persist to Supabase
+    const { data: saved, error } = await supabase.from("forum_posts").insert({
+      user_id: (await supabase.auth.getUser()).data.user?.id,
+      username: post.user,
+      title: post.title,
+      body: post.body,
+      tag: post.tag,
+      rich_text: post.richText || false,
+      poll: post.poll || null,
+    }).select().single();
+    const finalPost = saved ? { ...post, id: saved.id, _created: saved.created_at } : post;
+    setForumPosts(prev => [finalPost, ...prev]);
+    setActivePost(finalPost);
     setNewPostOpen(false);
     window.scrollTo({top:0,behavior:"smooth"});
-  },[]);
+  }, []);
 
   const handleOpenPost = useCallback(post => {
     setForumPosts(prev => prev.map(p => p.id===post.id ? {...p, views:(p.views||0)+1} : p));
@@ -6398,6 +6550,10 @@ function App() {
     setActiveSkin(null);
     setViewingProfile(null);
     window.scrollTo({top:0,behavior:"smooth"});
+    // Increment view count in DB (fire and forget)
+    if (typeof post.id === "number") {
+      supabase.rpc("increment_views", { post_id: post.id }).catch(() => {});
+    }
   }, []);
 
   const handleVotePoll = useCallback((postId, option) => {
@@ -6913,7 +7069,7 @@ function App() {
                 );
               })()}
             </div>
-            <button onClick={()=>setCurrentUser(null)} style={{background:"none",border:"1px solid #252525",borderRadius:8,color:"#555",cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:600,padding:"5px 10px"}}>Log out</button>
+            <button onClick={async ()=>{ await supabase.auth.signOut(); setCurrentUser(null); }} style={{background:"none",border:"1px solid #252525",borderRadius:8,color:"#555",cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:600,padding:"5px 10px"}}>Log out</button>
             <button onClick={()=>navigate("calculator")} style={{background:"linear-gradient(135deg,#f97316,#c2410c)",border:"none",borderRadius:10,color:"#000",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,padding:"8px 16px",flexShrink:0}}>Calculator</button>
           </div>
         ) : (
