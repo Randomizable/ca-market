@@ -5548,95 +5548,75 @@ const DEMO_TRADERS = [];
 const DEMO_BASE_VALUES = {};
 
 function SubmissionFeed({ allSkins, submissions, bracketSubs, onGoSkin }) {
-  const [demoFeed,    setDemoFeed]    = useState([]);
-  const [liveSubs,    setLiveSubs]    = useState([]); // only submissions added this session
-  const [pushing,     setPushing]     = useState(false);
-  const scrollRef     = useRef(null);
-  const CARD_H        = 88;
-  const prevSubCount  = useRef(null);
+  const [feed,    setFeed]    = useState([]);
+  const [pushing, setPushing] = useState(false);
+  const scrollRef = useRef(null);
 
-  // Seed initial demo entries then add one every 3–5s
+  // Build a feed entry from a submission row
+  const makeEntry = (skinId, sub, bracketId=null) => {
+    const skin = allSkins.find(s => s.id === skinId);
+    if (!skin) return null;
+    return {
+      id: sub._id || `${skinId}_${bracketId||"base"}_${sub.value}_${sub.submittedAt}`,
+      skin, value: sub.value, trader: sub.traderId,
+      bracketId, flagged: sub.flagged,
+      _ts: new Date(sub.submittedAt).getTime() || Date.now(),
+    };
+  };
+
+  // Load last 20 real submissions on mount
   useEffect(() => {
-    const skinsWithVal = allSkins.filter(s => s.val);
-    if (skinsWithVal.length === 0) return; // no data yet — feed stays empty
-    const makeEntry = (i, tsOffset=0) => {
-      const skin  = skinsWithVal[i % skinsWithVal.length];
-      const base  = skin.val.avg;
-      const swing = (Math.random() - 0.46) * 0.12;
-      const value = Math.round(base * (1 + swing) / 10) * 10;
-      return { id:`demo_${i}_${Date.now()}`, skin, value, trader:"—", bracketId:null, _ts: Date.now() - tsOffset };
-    };
-    const seed = Array.from({length:8}, (_, i) => makeEntry(i, i * 7000));
-    setDemoFeed(seed);
-    let counter = 8;
-    const addEntry = () => {
-      const entry = makeEntry(counter++);
-      setPushing(true);
-      setTimeout(() => {
-        setDemoFeed(prev => [entry, ...prev].slice(0, 30));
-        setPushing(false);
-        if (scrollRef.current) scrollRef.current.scrollTop = 0;
-      }, 320);
-    };
-    let timeoutId;
-    const schedule = () => {
-      timeoutId = setTimeout(() => { addEntry(); schedule(); }, 3500 + Math.random() * 1800);
-    };
-    schedule();
-    return () => clearTimeout(timeoutId);
+    if (allSkins.length === 0) return;
+    const entries = [];
+    allSkins.forEach(skin => {
+      (submissions[skin.id] || []).forEach(s => {
+        const e = makeEntry(skin.id, s);
+        if (e && !s.flagged) entries.push(e);
+      });
+      Object.entries(bracketSubs[skin.id] || {}).forEach(([bracketId, subs]) => {
+        subs.forEach(s => {
+          const e = makeEntry(skin.id, s, bracketId);
+          if (e && !s.flagged) entries.push(e);
+        });
+      });
+    });
+    const sorted = entries.sort((a,b) => b._ts - a._ts).slice(0, 20);
+    setFeed(sorted);
+  }, [allSkins.length]); // only on initial load
+
+  // Real-time: watch for new submissions via postgres_changes
+  useEffect(() => {
+    const channel = supabase.channel("submissions_feed")
+      .on("postgres_changes", { event:"INSERT", schema:"public", table:"submissions" }, payload => {
+        const s = payload.new;
+        if (s.flagged) return;
+        const skin = allSkins.find(sk => sk.id === s.skin_id);
+        if (!skin) return;
+        const entry = { id: s.id, skin, value: s.value, trader: s.trader_id, bracketId: null, flagged: false, _ts: Date.now() };
+        setPushing(true);
+        setTimeout(() => { setPushing(false); if (scrollRef.current) scrollRef.current.scrollTop = 0; }, 320);
+        setFeed(prev => [entry, ...prev].slice(0, 30));
+      })
+      .on("postgres_changes", { event:"INSERT", schema:"public", table:"bracket_submissions" }, payload => {
+        const s = payload.new;
+        if (s.flagged) return;
+        const skin = allSkins.find(sk => sk.id === s.skin_id);
+        if (!skin) return;
+        const entry = { id: s.id, skin, value: s.value, trader: s.trader_id, bracketId: s.bracket_id, flagged: false, _ts: Date.now() };
+        setPushing(true);
+        setTimeout(() => { setPushing(false); if (scrollRef.current) scrollRef.current.scrollTop = 0; }, 320);
+        setFeed(prev => [entry, ...prev].slice(0, 30));
+      })
+      .subscribe();
+    return () => supabase.removeChannel(channel);
   }, [allSkins]);
 
-  // Merge live session subs + demo, sorted newest first with direction
-  const feed = useMemo(() => {
-    return [...demoFeed, ...liveSubs]
-      .sort((a,b) => b._ts - a._ts)
-      .slice(0, 30)
-      .map((e, i, arr) => {
-        const prev = arr.slice(i+1).find(x => x.skin.id === e.skin.id && x.bracketId === e.bracketId);
-        const dir  = prev ? (e.value > prev.value ? "up" : e.value < prev.value ? "down" : "flat") : "flat";
-        return { ...e, dir };
-      });
-  }, [demoFeed, liveSubs]);
-
-  // Track baseline on mount, then watch for new session submissions only
-  useEffect(() => {
-    const count = (s, b) =>
-      Object.values(s).flat().length +
-      Object.values(b).flatMap(x => Object.values(x).flat()).length;
-    // Set baseline on first render
-    if (prevSubCount.current === null) {
-      prevSubCount.current = count(submissions, bracketSubs);
-      return;
-    }
-    const n = count(submissions, bracketSubs);
-    if (n > prevSubCount.current) {
-      prevSubCount.current = n;
-      // Find the newest entry just added (highest _ts among all real subs)
-      const allEntries = [];
-      allSkins.forEach(skin => {
-        (submissions[skin.id] || []).forEach(s => {
-          if (!s.flagged) allEntries.push({ id:`real_${skin.id}_${s.submittedAt}_${s.value}`, skin, trader:s.traderId, value:s.value, _ts: Date.now(), bracketId:null });
-        });
-        Object.entries(bracketSubs[skin.id] || {}).forEach(([bracketId, subs]) => {
-          subs.forEach(s => {
-            if (!s.flagged) allEntries.push({ id:`bracket_${skin.id}_${bracketId}_${s.submittedAt}_${s.value}`, skin, trader:s.traderId, value:s.value, _ts: Date.now(), bracketId });
-          });
-        });
-      });
-      // Only add entries we haven't seen in liveSubs yet
-      setLiveSubs(prev => {
-        const existingIds = new Set(prev.map(e => e.id));
-        const newEntries = allEntries.filter(e => !existingIds.has(e.id));
-        if (!newEntries.length) return prev;
-        setPushing(true);
-        setTimeout(() => {
-          setPushing(false);
-          if (scrollRef.current) scrollRef.current.scrollTop = 0;
-        }, 320);
-        return [...newEntries, ...prev].slice(0, 30);
-      });
-    }
-  }, [submissions, bracketSubs, allSkins]);
+  // Compute direction vs previous entry for same skin
+  const feedWithDir = useMemo(() => feed.map((e, i, arr) => {
+    const prev = arr.slice(i+1).find(x => x.skin.id === e.skin.id && x.bracketId === e.bracketId);
+    const dir  = prev ? (e.value > prev.value ? "up" : e.value < prev.value ? "down" : "flat") : "flat";
+    return { ...e, dir };
+  }), [feed]);
 
   const renderCard = (entry) => {
     const up   = entry.dir === "up";
@@ -5695,12 +5675,12 @@ function SubmissionFeed({ allSkins, submissions, bracketSubs, onGoSkin }) {
             overflowY:"auto", overflowX:"hidden",
             scrollbarWidth:"none", msOverflowStyle:"none",
             padding:"8px 8px 48px",
-            transform: pushing ? `translateY(${CARD_H}px)` : "translateY(0px)",
-            transition: pushing ? `transform 0.30s cubic-bezier(0.2,0,0.2,1)` : "none",
+            transform: pushing ? "translateY(88px)" : "translateY(0px)",
+            transition: pushing ? "transform 0.30s cubic-bezier(0.2,0,0.2,1)" : "none",
           }}>
-          {feed.length === 0
+          {feedWithDir.length === 0
             ? <div style={{padding:"32px 8px",textAlign:"center",color:"#333",fontSize:11}}>Waiting for submissions…</div>
-            : feed.map(e => renderCard(e))
+            : feedWithDir.map(e => renderCard(e))
           }
         </div>
         {/* Bottom fade */}
