@@ -6,8 +6,8 @@
   <title>CA Market — Combat Arena Price Index</title>
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone@7.23.0/babel.min.js"></script>
-  <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <!-- Recharts needs prop-types as a peer dep in UMD mode -->
   <script src="https://unpkg.com/prop-types@15.8.1/prop-types.js"></script>
   <script src="https://unpkg.com/recharts@2.8.0/umd/Recharts.js"></script>
@@ -240,7 +240,7 @@ function isOutlier(value, subs) {
 // ─────────────────────────────────────────────────────────────
 const SUPABASE_URL  = "https://zsdkajecvfnwemdesthf.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpzZGthamVjdmZud2VtZGVzdGhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4OTMzNTcsImV4cCI6MjA4OTQ2OTM1N30.WTWJcANSRrDFD7WpMuNS1eDI5XCLogAWzgAueHC2a40";
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+const supabase = (window.supabase || window.supabaseJs)?.createClient(SUPABASE_URL, SUPABASE_ANON);
 
 const WEEK_MS = 7*24*60*60*1000;
 const MIN_VOTES = 5;      // minimum votes before result is valid
