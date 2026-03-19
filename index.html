@@ -116,6 +116,7 @@ function timeAgo(ts) {
 // Converts Supabase snake_case profile to camelCase used throughout the app
 function normaliseProfile(p) {
   if (!p) return null;
+  const joinedAt = p.joined_at || p.joinedAt || null;
   return {
     username:        p.username,
     role:            p.role            ?? "community",
@@ -128,8 +129,18 @@ function normaliseProfile(p) {
     reputation:      p.reputation      ?? 10,
     totalSubmissions:p.totalSubmissions?? p.total_submissions ?? 0,
     badge:           p.badge           ?? null,
-    joinedDaysAgo:   p.joinedDaysAgo   ?? (p.joined_at ? Math.floor((Date.now() - new Date(p.joined_at)) / 86400000) : 0),
+    joinedAt,
+    // Computed fresh each login from the stored timestamp
+    joinedDaysAgo:   joinedAt
+      ? Math.floor((Date.now() - new Date(joinedAt)) / 86400000)
+      : (p.joinedDaysAgo ?? 0),
   };
+}
+
+// Always get a live account age — use joinedAt if available, fall back to stored value
+function getJoinedDaysAgo(profile) {
+  if (profile?.joinedAt) return Math.floor((Date.now() - new Date(profile.joinedAt)) / 86400000);
+  return profile?.joinedDaysAgo ?? 0;
 }
 // skinLabel: "Galaxy | FAMAS" — used on cards and in search
 const skinLabel    = s => s.specificWeapon ? `${s.name} | ${s.specificWeapon}` : s.name;
@@ -1110,7 +1121,7 @@ function SkinCard({ skin, onClick, viewMode="simple", hasAlert=false }) {
 // ─────────────────────────────────────────────────────────────
 function DemandVoteWidget({ skin, currentUser, userVote, onVote }) {
   const voteCheck=canUserVote(currentUser);
-  const wl=currentUser?weightLabel(currentUser.joinedDaysAgo):null;
+  const wl=currentUser?weightLabel(getJoinedDaysAgo(currentUser)):null;
   const shift=Math.max(-1,Math.min(1,Math.round(skin.net/25)));
   return (
     <Panel>
@@ -1127,7 +1138,7 @@ function DemandVoteWidget({ skin, currentUser, userVote, onVote }) {
         <div>
           <div style={{marginBottom:12,padding:"8px 12px",background:"#111",borderRadius:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <span style={{fontSize:11,color:"#555"}}>Your vote weight</span>
-            <Tip content={<><strong style={{color:wl.color}}>{wl.w}</strong><br/>{wl.note}<br/>Account age: {currentUser.joinedDaysAgo} days</>}>
+            <Tip content={<><strong style={{color:wl.color}}>{wl.w}</strong><br/>{wl.note}<br/>Account age: {getJoinedDaysAgo(currentUser)} days</>}>
               <span style={{fontSize:13,fontWeight:800,color:wl.color,cursor:"default"}}>{wl.w}</span>
             </Tip>
           </div>
@@ -4999,9 +5010,9 @@ function AdminPage({ allSkins, submissions, setSubmissions, bracketSubs, setBrac
             <SectionLabel>Promote to Trader</SectionLabel>
             <div style={{fontSize:12,color:"#555",marginBottom:10,marginTop:6}}>Community members eligible for promotion (7+ days old)</div>
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              {members.filter(([,p])=>p.joinedDaysAgo>=7).length===0
+              {members.filter(([,p])=>getJoinedDaysAgo(p)>=7).length===0
                 ? <div style={{fontSize:13,color:"#444",padding:"12px 0"}}>No eligible members.</div>
-                : members.filter(([,p])=>p.joinedDaysAgo>=7).map(([username,p])=>(
+                : members.filter(([,p])=>getJoinedDaysAgo(p)>=7).map(([username,p])=>(
                   <div key={username} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:"#111",borderRadius:12,flexWrap:"wrap",gap:8}}>
                     <div style={{display:"flex",alignItems:"center",gap:10}}>
                       <Avatar profile={{...p,username}} size={36}/>
@@ -6485,7 +6496,7 @@ function App() {
   }, [currentUser]);
 
   const handleVote = useCallback(async (skinId, dir) => {
-    const w = voteWeight(currentUser?.joinedDaysAgo ?? 0);
+    const w = voteWeight(getJoinedDaysAgo(currentUser));
     setUserVotes(prev => {
       const ex = prev[skinId] ?? 0, nd = ex===dir ? 0 : dir, delta = (nd-ex)*w;
       setVotes(v => ({ ...v, [skinId]: parseFloat(((v[skinId]??0)+delta).toFixed(2)) }));
@@ -6625,7 +6636,7 @@ function App() {
     const alreadyRequested = traderRequests.find(r => r.username === currentUser.username && r.status === "pending");
     if (alreadyRequested) { showToast("You already have a pending request.", "warn"); return; }
     if (p.reputation < REQ_REP) { showToast(`You need at least ${REQ_REP} reputation to apply. You have ${p.reputation}.`, "warn"); return; }
-    if (p.joinedDaysAgo < REQ_DAYS) { showToast(`Your account needs to be at least ${REQ_DAYS} days old to apply.`, "warn"); return; }
+    if (getJoinedDaysAgo(p) < REQ_DAYS) { showToast(`Your account needs to be at least ${REQ_DAYS} days old to apply.`, "warn"); return; }
     if (posts < REQ_POSTS) { showToast(`You need at least ${REQ_POSTS} forum post to apply.`, "warn"); return; }
     const req = {
       id: `tr_${Date.now()}`, username: currentUser.username,
