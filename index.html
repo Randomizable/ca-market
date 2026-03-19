@@ -4095,6 +4095,20 @@ const INIT_ADMIN_LOG = [];
 //  ADMIN PANEL
 // ─────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────
+//  ACTION BUTTON (shared between admin components)
+// ─────────────────────────────────────────────────────────────
+function ActionBtn({ label, color, onClick, disabled=false }) {
+  return (
+    <button onClick={onClick} disabled={disabled}
+      style={{background:color+"18",border:`1px solid ${color}40`,borderRadius:8,color:disabled?"#555":color,cursor:disabled?"default":"pointer",fontFamily:"inherit",fontSize:11,fontWeight:700,padding:"5px 12px",transition:"all 0.15s",opacity:disabled?0.5:1}}
+      onMouseEnter={e=>{if(!disabled)e.currentTarget.style.background=color+"30";}}
+      onMouseLeave={e=>{if(!disabled)e.currentTarget.style.background=color+"18";}}>
+      {label}
+    </button>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 //  SKIN MANAGEMENT (Admin)
 // ─────────────────────────────────────────────────────────────
 function SkinManagement({ skinsDB, setSkinsDB, log, allSkins }) {
@@ -4555,14 +4569,6 @@ function AdminPage({ allSkins, submissions, setSubmissions, bracketSubs, setBrac
     <div style={{background:"#141414",border:`1px solid ${accent}`,borderRadius:14,padding:"14px 16px",marginBottom:10}}>
       {children}
     </div>
-  );
-
-  const ActionBtn = ({label, color, onClick}) => (
-    <button onClick={onClick} style={{background:color+"18",border:`1px solid ${color}40`,borderRadius:8,color,cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:700,padding:"5px 12px",transition:"all 0.15s"}}
-      onMouseEnter={e=>{e.currentTarget.style.background=color+"30";}}
-      onMouseLeave={e=>{e.currentTarget.style.background=color+"18";}}>
-      {label}
-    </button>
   );
 
   const EmptyState = ({msg}) => (
