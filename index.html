@@ -347,8 +347,8 @@ function canUserVote(account) {
   if (account.joinedDaysAgo<7)  return { ok:false, reason:`Account must be 7+ days old. (${7-account.joinedDaysAgo} days remaining)` };
   return { ok:true, reason:null };
 }
-function buildSkins(submissions, votes, frozen, bracketSubs) {
-  return SKINS_DB.map(skin=>{
+function buildSkins(skinsDB, submissions, votes, frozen, bracketSubs) {
+  return skinsDB.map(skin=>{
     const subs    = submissions[skin.id]??[];
     const val     = calcValue(subs);
     const hist    = VALUE_HISTORY_DB[skin.id]??[];
@@ -797,7 +797,7 @@ function ProfilePage({ username, profiles, submissions, allSkins, isOwn, onBack,
                 <SectionLabel>Recent Value Submissions</SectionLabel>
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   {userSubs.slice(0,4).map((s,i)=>{
-                    const skin = SKINS_DB.find(sk=>sk.id===s.skinId);
+                    const skin = allSkins.find(sk=>sk.id===s.skinId);
                     return (
                       <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#111",borderRadius:10,padding:"10px 14px"}}>
                         <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -830,7 +830,7 @@ function ProfilePage({ username, profiles, submissions, allSkins, isOwn, onBack,
           ) : (
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
               {userSubs.map((s,i)=>{
-                const skin = SKINS_DB.find(sk=>sk.id===s.skinId);
+                const skin = allSkins.find(sk=>sk.id===s.skinId);
                 return (
                   <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#111",borderRadius:12,padding:"12px 16px"}}>
                     <div style={{display:"flex",alignItems:"center",gap:12}}>
@@ -4094,17 +4094,157 @@ const INIT_ADMIN_LOG = [];
 // ─────────────────────────────────────────────────────────────
 //  ADMIN PANEL
 // ─────────────────────────────────────────────────────────────
-function AdminPage({ allSkins, submissions, setSubmissions, bracketSubs, setBracketSubs, disputes, setDisputes, frozen, setFrozen, forumPosts, setForumPosts, profiles, setProfiles, onViewProfile, onViewSkin, setNotifications, siteMode, setSiteMode, scamReports, setScamReports, confirmedScammers, setConfirmedScammers, communityVotes, setCommunityVotes, traderRequests, setTraderRequests, announcement, setAnnouncement }) {
+// ─────────────────────────────────────────────────────────────
+//  SKIN MANAGEMENT (Admin)
+// ─────────────────────────────────────────────────────────────
+function SkinManagement({ skinsDB, setSkinsDB, log, allSkins }) {
+  const [skinForm,    setSkinForm]    = useState({ id:"", name:"", weapon:"AR", specificWeapon:"", rarity:"Common", emoji:"🔫" });
+  const [skinError,   setSkinError]   = useState("");
+  const [skinSuccess, setSkinSuccess] = useState("");
+  const [saving,      setSaving]      = useState(false);
+  const [editingId,   setEditingId]   = useState(null);
+
+  const WEAPONS  = ["AR","Sniper","SMG","LMG","DMR","Shotgun","Handgun","Melee","Throwable","Battle Rifle"];
+  const RARITIES = ["Common","Uncommon","Rare","Legendary","Artifact"];
+  const RC = { Common:"#e0e0e0", Uncommon:"#4ade80", Rare:"#a855f7", Legendary:"#fbbf24", Artifact:"#f87171" };
+  const sel = {background:"#111",border:"1px solid #252525",borderRadius:10,color:"#e0e0e0",fontFamily:"inherit",fontSize:13,padding:"9px 13px",outline:"none",width:"100%",boxSizing:"border-box"};
+
+  const genId = (name, weapon) => {
+    const w = weapon.toLowerCase().replace(/[^a-z0-9]/g,"").slice(0,6);
+    const n = name.toLowerCase().replace(/[^a-z0-9]/g,"").slice(0,10);
+    return `${w}_${n}`;
+  };
+
+  const reset = () => { setSkinForm({id:"",name:"",weapon:"AR",specificWeapon:"",rarity:"Common",emoji:"🔫"}); setEditingId(null); setSkinError(""); setSkinSuccess(""); };
+
+  const handleSave = async () => {
+    setSkinError(""); setSkinSuccess("");
+    if (!skinForm.name.trim())         { setSkinError("Name is required."); return; }
+    if (!skinForm.specificWeapon.trim()){ setSkinError("Specific weapon is required (e.g. FAMAS, AWP)."); return; }
+    const id = editingId || genId(skinForm.name, skinForm.specificWeapon);
+    if (!editingId && skinsDB.find(s => s.id === id)) { setSkinError(`ID "${id}" already exists — try a different name.`); return; }
+    setSaving(true);
+    const skin = { id, name:skinForm.name.trim(), weapon:skinForm.weapon, specificWeapon:skinForm.specificWeapon.trim(), rarity:skinForm.rarity, emoji:skinForm.emoji||"🔫" };
+    try {
+      const { error } = await supabase.from("skins").upsert({ id, name:skin.name, weapon:skin.weapon, specific_weapon:skin.specificWeapon, rarity:skin.rarity, emoji:skin.emoji });
+      if (error) { setSkinError(`DB error: ${error.message}`); return; }
+      setSkinsDB(prev => editingId ? prev.map(s => s.id===editingId ? skin : s) : [...prev, skin]);
+      log(`${editingId?"Updated":"Added"} skin: ${skin.name} | ${skin.specificWeapon} (${skin.rarity})`);
+      setSkinSuccess(`✓ ${editingId?"Updated":"Added"} ${skin.name} | ${skin.specificWeapon}`);
+      reset();
+    } finally { setSaving(false); }
+  };
+
+  const handleEdit = (skin) => {
+    setSkinForm({id:skin.id, name:skin.name, weapon:skin.weapon, specificWeapon:skin.specificWeapon, rarity:skin.rarity, emoji:skin.emoji});
+    setEditingId(skin.id); setSkinError(""); setSkinSuccess("");
+  };
+
+  const handleDelete = async (skin) => {
+    if (!window.confirm(`Delete "${skin.name} | ${skin.specificWeapon}"? This cannot be undone.`)) return;
+    await supabase.from("skins").delete().eq("id", skin.id);
+    setSkinsDB(prev => prev.filter(s => s.id !== skin.id));
+    log(`Deleted skin: ${skin.name} | ${skin.specificWeapon}`);
+  };
+
+  const previewId = skinForm.id || genId(skinForm.name||"name", skinForm.specificWeapon||"weapon");
+
+  return (
+    <div>
+      {/* Add / Edit form */}
+      <Panel style={{marginBottom:16}}>
+        <SectionLabel>{editingId ? "Edit Skin" : "Add New Skin"}</SectionLabel>
+        {editingId && (
+          <div style={{fontSize:11,color:"#f97316",marginBottom:12}}>
+            Editing: <strong>{skinForm.name}</strong> —{" "}
+            <button onClick={reset} style={{background:"none",border:"none",color:"#555",cursor:"pointer",fontFamily:"inherit",fontSize:11,textDecoration:"underline"}}>Cancel</button>
+          </div>
+        )}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:8}}>
+          <div>
+            <div style={{fontSize:11,color:"#555",marginBottom:4}}>Skin Name</div>
+            <input style={sel} placeholder="e.g. Galaxy" value={skinForm.name}
+              onChange={e=>setSkinForm(p=>({...p,name:e.target.value}))}/>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:"#555",marginBottom:4}}>Specific Weapon</div>
+            <input style={sel} placeholder="e.g. FAMAS, AWP, MAC-10" value={skinForm.specificWeapon}
+              onChange={e=>setSkinForm(p=>({...p,specificWeapon:e.target.value}))}/>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:"#555",marginBottom:4}}>Weapon Category</div>
+            <select style={sel} value={skinForm.weapon} onChange={e=>setSkinForm(p=>({...p,weapon:e.target.value}))}>
+              {WEAPONS.map(w=><option key={w} value={w}>{w}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:"#555",marginBottom:4}}>Rarity</div>
+            <select style={{...sel,color:RC[skinForm.rarity]}} value={skinForm.rarity} onChange={e=>setSkinForm(p=>({...p,rarity:e.target.value}))}>
+              {RARITIES.map(r=><option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:"#555",marginBottom:4}}>Emoji</div>
+            <input style={sel} placeholder="🔫" value={skinForm.emoji} maxLength={4}
+              onChange={e=>setSkinForm(p=>({...p,emoji:e.target.value}))}/>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:"#555",marginBottom:4}}>Auto ID</div>
+            <div style={{...sel,color:"#444",userSelect:"all",cursor:"text"}}>{previewId}</div>
+          </div>
+        </div>
+        {skinError   && <div style={{marginTop:10,fontSize:12,color:"#f87171"}}>⚠ {skinError}</div>}
+        {skinSuccess && <div style={{marginTop:10,fontSize:12,color:"#4ade80"}}>{skinSuccess}</div>}
+        <button onClick={handleSave} disabled={saving}
+          style={{marginTop:14,background:saving?"#333":"linear-gradient(135deg,#f97316,#c2410c)",border:"none",borderRadius:10,color:saving?"#666":"#000",cursor:saving?"default":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,padding:"10px 20px"}}>
+          {saving?"Saving…":editingId?"Update Skin":"Add Skin"}
+        </button>
+      </Panel>
+
+      {/* All skins list */}
+      <Panel>
+        <SectionLabel>All Skins ({skinsDB.length})</SectionLabel>
+        <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:10}}>
+          {[...skinsDB].sort((a,b)=>a.rarity.localeCompare(b.rarity)||a.name.localeCompare(b.name)).map(skin=>{
+            const rc = RC[skin.rarity]||"#e0e0e0";
+            return (
+              <div key={skin.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"#111",borderRadius:12,flexWrap:"wrap"}}>
+                <span style={{fontSize:20,flexShrink:0}}>{skin.emoji}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"#e0e0e0"}}>{skin.name} <span style={{color:"#555",fontWeight:500}}>| {skin.specificWeapon}</span></div>
+                  <div style={{display:"flex",gap:6,marginTop:2,flexWrap:"wrap"}}>
+                    <span style={{fontSize:10,color:rc,background:rc+"18",border:"1px solid "+rc+"30",borderRadius:99,padding:"1px 7px",fontWeight:700}}>{skin.rarity}</span>
+                    <span style={{fontSize:10,color:"#555"}}>{skin.weapon}</span>
+                    <span style={{fontSize:10,color:"#333"}}>{skin.id}</span>
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:6,flexShrink:0}}>
+                  <ActionBtn label="Edit" color="#fbbf24" onClick={()=>handleEdit(skin)}/>
+                  <ActionBtn label="Delete" color="#f87171" onClick={()=>handleDelete(skin)}/>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+
+function AdminPage({ allSkins, submissions, setSubmissions, bracketSubs, setBracketSubs, disputes, setDisputes, frozen, setFrozen, forumPosts, setForumPosts, profiles, setProfiles, onViewProfile, onViewSkin, setNotifications, siteMode, setSiteMode, scamReports, setScamReports, confirmedScammers, setConfirmedScammers, communityVotes, setCommunityVotes, traderRequests, setTraderRequests, announcement, setAnnouncement, reportedPosts, setReportedPosts, adminLog, setAdminLog, skinsDB, setSkinsDB }) {
   const [activeSection, setActiveSection] = useState("sitemode");
-  const [reportedPosts, setReportedPosts] = useState(INIT_REPORTED_POSTS);
-  const [adminLog,      setAdminLog]      = useState(INIT_ADMIN_LOG);
   const [dismissed,     setDismissed]     = useState(new Set());
   const [announceInput, setAnnounceInput] = useState("");
   const [announceType,  setAnnounceType]  = useState("info");
   const [userSearch,    setUserSearch]    = useState("");
   const [banReason,     setBanReason]     = useState("");
 
-  const log = (action) => setAdminLog(prev=>[{ id:`l${Date.now()}`, action, time: new Date().toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}), admin:"AdminUser" }, ...prev]);
+  const log = (action) => {
+    const entry = { id:`l${Date.now()}`, action, time: new Date().toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}), admin:"AdminUser" };
+    setAdminLog(prev => [entry, ...prev]);
+    supabase.from("admin_log").insert({ admin:"AdminUser", action, details:{} }).catch(()=>{});
+  };
 
   // ── Pending flagged submissions (base + bracket) ──
   const pendingSubs = useMemo(() => [
@@ -4275,6 +4415,7 @@ function AdminPage({ allSkins, submissions, setSubmissions, bracketSubs, setBrac
     { id:"announce",    label:"Announce",          emoji:"📢",  badge: null },
     { id:"market",      label:"Market Intel",      emoji:"📊",  badge: null },
     { id:"traders",     label:"Traders",           emoji:"🔑",  badge: null },
+    { id:"skins",       label:"Skin Management",   emoji:"🔫",  badge: null },
     { id:"log",         label:"Activity Log",      emoji:"📜",  badge: null },
   ];
 
@@ -4454,6 +4595,7 @@ function AdminPage({ allSkins, submissions, setSubmissions, bracketSubs, setBrac
             { label:"Moderation", items: SECTIONS.filter(s=>["submissions","commvotes","disputes","reports","scamreports"].includes(s.id)) },
             { label:"Community", items: SECTIONS.filter(s=>["traderrequests","users","suspicious","traders"].includes(s.id)) },
             { label:"Analytics", items: SECTIONS.filter(s=>["spikes","market"].includes(s.id)) },
+            { label:"Skins",     items: SECTIONS.filter(s=>["skins"].includes(s.id)) },
             { label:"System",   items: SECTIONS.filter(s=>["log"].includes(s.id)) },
           ].map(group => (
             <div key={group.label} style={{marginBottom:8}}>
@@ -5363,6 +5505,10 @@ function AdminPage({ allSkins, submissions, setSubmissions, bracketSubs, setBrac
         </div>
       )}
 
+      {/* ── SKIN MANAGEMENT ── */}
+      {activeSection==="skins" && <SkinManagement skinsDB={skinsDB} setSkinsDB={setSkinsDB} log={log} allSkins={allSkins}/>}
+
+      {/* ── ACTIVITY LOG ── */}
       {activeSection==="log" && (
         <div>
           <div style={{fontSize:10,fontWeight:700,color:"#555",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:14}}>
@@ -6514,6 +6660,9 @@ function App() {
   const [traderRequests, setTraderRequests] = useState([]);
   const [toasts,         setToasts]         = useState([]);
   const [announcement,   setAnnouncement]   = useState({ text:"", type:"info", active:false });
+  const [reportedPosts,  setReportedPosts]  = useState([]);
+  const [adminLog,       setAdminLog]       = useState([]);
+  const [skinsDB,        setSkinsDB]        = useState(SKINS_DB);
   const [scamReports,       setScamReports]       = useState([]);
   const [confirmedScammers, setConfirmedScammers] = useState([]);
   const [profiles,     setProfiles]    = useState(INIT_PROFILES);
@@ -6526,7 +6675,7 @@ function App() {
   const [userAlerts,   setUserAlerts]   = useState({});
   const [chatMessages, setChatMessages] = useState([]);
 
-  const allSkins = useMemo(()=>buildSkins(submissions,votes,frozen,bracketSubs),[submissions,votes,frozen,bracketSubs]);
+  const allSkins = useMemo(()=>buildSkins(skinsDB,submissions,votes,frozen,bracketSubs),[skinsDB,submissions,votes,frozen,bracketSubs]);
 
   // ── Load site mode from Supabase (first thing, before rendering) ──
   useEffect(() => {
@@ -6543,6 +6692,18 @@ function App() {
         payload => { setSiteMode(payload.new.value); })
       .subscribe();
     return () => supabase.removeChannel(channel);
+  }, []);
+
+  // ── Load skins from Supabase (merges with hardcoded SKINS_DB, DB wins for new skins) ──
+  useEffect(() => {
+    supabase.from("skins").select("*").order("rarity", { ascending: false }).then(({ data }) => {
+      if (!data || data.length === 0) return; // fall back to hardcoded if DB empty
+      const mapped = data.map(s => ({
+        id: s.id, name: s.name, weapon: s.weapon,
+        specificWeapon: s.specific_weapon, rarity: s.rarity, emoji: s.emoji || "🔫",
+      }));
+      setSkinsDB(mapped);
+    });
   }, []);
 
   // ── Restore Supabase session on mount ──
@@ -6609,15 +6770,16 @@ function App() {
     });
   }, []);
 
-  // ── Load scam data from Supabase ──
+  // ── Load scam data from Supabase (admin-only, loaded after session restore) ──
   useEffect(() => {
+    if (!currentUser) return; // wait for session
     supabase.from("scam_reports").select("*").then(({ data }) => {
       if (data) setScamReports(data.map(r => ({ id: r.id, accusedUsername: r.accused_username, robloxUsername: r.roblox_username, discordUsername: r.discord_username, description: r.description, photos: r.photo_urls||[], reportedBy: r.reported_by, time: timeAgo(r.created_at), status: r.status })));
     });
     supabase.from("confirmed_scammers").select("*").then(({ data }) => {
       if (data) setConfirmedScammers(data.map(s => ({ id: s.id, username: s.username, robloxUsername: s.roblox_username, discordUsername: s.discord_username, description: s.description, photos: s.photo_urls||[], reportedBy: s.reported_by, confirmedAt: new Date(s.confirmed_at).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}) })));
     });
-  }, []);
+  }, [currentUser?.username]);
 
   // ── Real-time: new forum posts ──
   useEffect(() => {
@@ -6647,8 +6809,9 @@ function App() {
     });
   }, []);
 
-  // ── Load trader requests (admin) ──
+  // ── Load trader requests (admin-only, loaded after session restore) ──
   useEffect(() => {
+    if (!currentUser) return;
     supabase.from("trader_requests").select("*").order("requested_at", { ascending: false }).then(({ data }) => {
       if (data) setTraderRequests(data.map(r => ({
         id: r.id, username: r.username, reputation: r.reputation,
@@ -6656,7 +6819,7 @@ function App() {
         requestedAt: new Date(r.requested_at).toLocaleDateString("en-GB", { day:"numeric", month:"short", year:"numeric" }),
       })));
     });
-  }, []);
+  }, [currentUser?.username]);
 
   // ── Load frozen skins ──
   useEffect(() => {
@@ -6668,8 +6831,9 @@ function App() {
     });
   }, []);
 
-  // ── Load disputes ──
+  // ── Load disputes (admin-only) ──
   useEffect(() => {
+    if (!currentUser) return;
     supabase.from("disputes").select("*").eq("resolved", false).then(({ data }) => {
       if (!data) return;
       const grouped = {};
@@ -6679,7 +6843,29 @@ function App() {
       });
       setDisputes(grouped);
     });
-  }, []);
+  }, [currentUser?.username]);
+
+  // ── Load reported posts (admin-only) ──
+  useEffect(() => {
+    if (!currentUser) return;
+    supabase.from("reported_posts").select("*").eq("status", "pending").then(({ data }) => {
+      if (data) setReportedPosts(data.map(r => ({
+        id: r.id, postId: r.post_id, reportedBy: r.reported_by,
+        reason: r.reason, time: timeAgo(r.created_at), status: r.status,
+      })));
+    });
+  }, [currentUser?.username]);
+
+  // ── Load admin log (admin-only) ──
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== "admin") return;
+    supabase.from("admin_log").select("*").order("created_at", { ascending: false }).limit(100).then(({ data }) => {
+      if (data) setAdminLog(data.map(e => ({
+        id: e.id, action: e.action, admin: e.admin,
+        time: new Date(e.created_at).toLocaleString("en-US", { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" }),
+      })));
+    });
+  }, [currentUser?.username]);
 
   // ── Load chat messages ──
   useEffect(() => {
@@ -7734,6 +7920,9 @@ function App() {
             confirmedScammers={confirmedScammers} setConfirmedScammers={setConfirmedScammers}
             siteMode={siteMode} setSiteMode={setSiteMode}
             announcement={announcement} setAnnouncement={setAnnouncement}
+            reportedPosts={reportedPosts} setReportedPosts={setReportedPosts}
+            adminLog={adminLog} setAdminLog={setAdminLog}
+            skinsDB={skinsDB} setSkinsDB={setSkinsDB}
             communityVotes={communityVotes} setCommunityVotes={setCommunityVotes}
             traderRequests={traderRequests} setTraderRequests={setTraderRequests}
           />
