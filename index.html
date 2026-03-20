@@ -5477,7 +5477,10 @@ function AdminPage({ allSkins, submissions, setSubmissions, bracketSubs, setBrac
                 <div key={mode.id} onClick={async ()=>{
                     setSiteMode(mode.id);
                     log(`Site mode changed to ${mode.label}`);
-                    await supabase.from("site_config").update({ value: mode.id }).eq("key", "site_mode");
+                    const { data: { session } } = await supabase.auth.getSession();
+                    if (!session) return;
+                    const { error } = await supabase.from("site_config").upsert({ key:"site_mode", value: mode.id });
+                    if (error) console.warn("[site_config save]", error.message);
                   }}
                   style={{display:"flex",alignItems:"center",gap:14,padding:"16px 18px",borderRadius:14,border:`1px solid ${active ? mode.color+"55" : "#1e1e1e"}`,background:active ? mode.color+"0d" : "#111",cursor:"pointer",transition:"all 0.15s"}}
                   onMouseEnter={e=>{ if(!active) e.currentTarget.style.borderColor="#333"; }}
@@ -6769,14 +6772,30 @@ function App() {
     });
   }, []);
 
-  // ── Load scam data from Supabase (admin-only, loaded after session restore) ──
+  // ── Load scam data from Supabase (admin-only — waits for confirmed auth session) ──
   useEffect(() => {
-    if (!currentUser) return; // wait for session
-    supabase.from("scam_reports").select("*").then(({ data }) => {
-      if (data) setScamReports(data.map(r => ({ id: r.id, accusedUsername: r.accused_username, robloxUsername: r.roblox_username, discordUsername: r.discord_username, description: r.description, photos: r.photo_urls||[], reportedBy: r.reported_by, time: timeAgo(r.created_at), status: r.status })));
-    });
-    supabase.from("confirmed_scammers").select("*").then(({ data }) => {
-      if (data) setConfirmedScammers(data.map(s => ({ id: s.id, username: s.username, robloxUsername: s.roblox_username, discordUsername: s.discord_username, description: s.description, photos: s.photo_urls||[], reportedBy: s.reported_by, confirmedAt: new Date(s.confirmed_at).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}) })));
+    if (!currentUser) return;
+    // Wait for the auth session to be confirmed before querying RLS-protected tables
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) return;
+      supabase.from("scam_reports").select("*").then(({ data, error }) => {
+        if (error) console.warn("[scam_reports]", error.message);
+        if (data) setScamReports(data.map(r => ({
+          id: r.id, accusedUsername: r.accused_username, robloxUsername: r.roblox_username,
+          discordUsername: r.discord_username, description: r.description,
+          photos: r.photo_urls||[], reportedBy: r.reported_by,
+          time: timeAgo(r.created_at), status: r.status,
+        })));
+      });
+      supabase.from("confirmed_scammers").select("*").then(({ data, error }) => {
+        if (error) console.warn("[confirmed_scammers]", error.message);
+        if (data) setConfirmedScammers(data.map(s => ({
+          id: s.id, username: s.username, robloxUsername: s.roblox_username,
+          discordUsername: s.discord_username, description: s.description,
+          photos: s.photo_urls||[], reportedBy: s.reported_by,
+          confirmedAt: new Date(s.confirmed_at).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}),
+        })));
+      });
     });
   }, [currentUser?.username]);
 
@@ -6808,19 +6827,53 @@ function App() {
     });
   }, []);
 
-  // ── Load trader requests (admin-only, loaded after session restore) ──
+  // ── Load all admin-only data (waits for confirmed auth session) ──
   useEffect(() => {
     if (!currentUser) return;
-    supabase.from("trader_requests").select("*").order("requested_at", { ascending: false }).then(({ data }) => {
-      if (data) setTraderRequests(data.map(r => ({
-        id: r.id, username: r.username, reputation: r.reputation,
-        joinedDaysAgo: r.joined_days, posts: r.post_count, status: r.status,
-        requestedAt: new Date(r.requested_at).toLocaleDateString("en-GB", { day:"numeric", month:"short", year:"numeric" }),
-      })));
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) return;
+
+      // Trader requests
+      supabase.from("trader_requests").select("*").order("requested_at", { ascending: false }).then(({ data }) => {
+        if (data) setTraderRequests(data.map(r => ({
+          id: r.id, username: r.username, reputation: r.reputation,
+          joinedDaysAgo: r.joined_days, posts: r.post_count, status: r.status,
+          requestedAt: new Date(r.requested_at).toLocaleDateString("en-GB", { day:"numeric", month:"short", year:"numeric" }),
+        })));
+      });
+
+      // Disputes
+      supabase.from("disputes").select("*").eq("resolved", false).then(({ data }) => {
+        if (!data) return;
+        const grouped = {};
+        data.forEach(d => {
+          if (!grouped[d.skin_id]) grouped[d.skin_id] = [];
+          grouped[d.skin_id].push({ user: d.username, reason: d.reason, time: timeAgo(d.created_at), _id: d.id });
+        });
+        setDisputes(grouped);
+      });
+
+      // Reported posts
+      supabase.from("reported_posts").select("*").eq("status", "pending").then(({ data }) => {
+        if (data) setReportedPosts(data.map(r => ({
+          id: r.id, postId: r.post_id, reportedBy: r.reported_by,
+          reason: r.reason, time: timeAgo(r.created_at), status: r.status,
+        })));
+      });
+
+      // Admin log (admin role only)
+      if (currentUser.role === "admin") {
+        supabase.from("admin_log").select("*").order("created_at", { ascending: false }).limit(100).then(({ data }) => {
+          if (data) setAdminLog(data.map(e => ({
+            id: e.id, action: e.action, admin: e.admin,
+            time: new Date(e.created_at).toLocaleString("en-US", { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" }),
+          })));
+        });
+      }
     });
   }, [currentUser?.username]);
 
-  // ── Load frozen skins ──
+  // ── Load frozen skins (public, no auth needed) ──
   useEffect(() => {
     supabase.from("frozen_skins").select("skin_id").then(({ data }) => {
       if (!data) return;
@@ -6829,42 +6882,6 @@ function App() {
       setFrozen(frozenMap);
     });
   }, []);
-
-  // ── Load disputes (admin-only) ──
-  useEffect(() => {
-    if (!currentUser) return;
-    supabase.from("disputes").select("*").eq("resolved", false).then(({ data }) => {
-      if (!data) return;
-      const grouped = {};
-      data.forEach(d => {
-        if (!grouped[d.skin_id]) grouped[d.skin_id] = [];
-        grouped[d.skin_id].push({ user: d.username, reason: d.reason, time: timeAgo(d.created_at), _id: d.id });
-      });
-      setDisputes(grouped);
-    });
-  }, [currentUser?.username]);
-
-  // ── Load reported posts (admin-only) ──
-  useEffect(() => {
-    if (!currentUser) return;
-    supabase.from("reported_posts").select("*").eq("status", "pending").then(({ data }) => {
-      if (data) setReportedPosts(data.map(r => ({
-        id: r.id, postId: r.post_id, reportedBy: r.reported_by,
-        reason: r.reason, time: timeAgo(r.created_at), status: r.status,
-      })));
-    });
-  }, [currentUser?.username]);
-
-  // ── Load admin log (admin-only) ──
-  useEffect(() => {
-    if (!currentUser || currentUser.role !== "admin") return;
-    supabase.from("admin_log").select("*").order("created_at", { ascending: false }).limit(100).then(({ data }) => {
-      if (data) setAdminLog(data.map(e => ({
-        id: e.id, action: e.action, admin: e.admin,
-        time: new Date(e.created_at).toLocaleString("en-US", { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" }),
-      })));
-    });
-  }, [currentUser?.username]);
 
   // ── Load chat messages ──
   useEffect(() => {
