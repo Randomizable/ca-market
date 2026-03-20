@@ -5478,9 +5478,10 @@ function AdminPage({ allSkins, submissions, setSubmissions, bracketSubs, setBrac
                     setSiteMode(mode.id);
                     log(`Site mode changed to ${mode.label}`);
                     const { data: { session } } = await supabase.auth.getSession();
-                    if (!session) return;
-                    const { error } = await supabase.from("site_config").upsert({ key:"site_mode", value: mode.id });
-                    if (error) console.warn("[site_config save]", error.message);
+                    if (!session) { console.warn("[site_config] no session"); return; }
+                    const { error } = await supabase.from("site_config")
+                      .update({ value: mode.id }).eq("key", "site_mode");
+                    if (error) console.warn("[site_config save]", error.message, error.code);
                   }}
                   style={{display:"flex",alignItems:"center",gap:14,padding:"16px 18px",borderRadius:14,border:`1px solid ${active ? mode.color+"55" : "#1e1e1e"}`,background:active ? mode.color+"0d" : "#111",cursor:"pointer",transition:"all 0.15s"}}
                   onMouseEnter={e=>{ if(!active) e.currentTarget.style.borderColor="#333"; }}
@@ -6669,11 +6670,11 @@ function App() {
   // ── Load site mode from Supabase (first thing, before rendering) ──
   useEffect(() => {
     supabase.from("site_config").select("value").eq("key", "site_mode").single()
-      .then(({ data }) => {
-        if (data) setSiteMode(data.value);
+      .then(({ data, error }) => {
+        if (error) console.warn("[site_config load]", error.message);
+        if (data?.value) setSiteMode(data.value);
         setSiteLoading(false);
-      })
-      .catch(() => setSiteLoading(false));
+      });
 
     // Real-time: if admin changes site mode, all open sessions update within seconds
     const channel = supabase.channel("site_config_realtime")
