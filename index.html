@@ -4257,7 +4257,9 @@ function AdminPage({ allSkins, submissions, setSubmissions, bracketSubs, setBrac
   const log = (action) => {
     const entry = { id:`l${Date.now()}`, action, time: new Date().toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}), admin:"AdminUser" };
     setAdminLog(prev => [entry, ...prev]);
-    supabase.from("admin_log").insert({ admin:"AdminUser", action, details:{} }).catch(()=>{});
+    supabase.from("admin_log").insert({ admin:"AdminUser", action, details:{} }).then(({ error }) => {
+      if (error) console.warn("[admin_log]", error.message);
+    });
   };
 
   // ── Pending flagged submissions (base + bracket) ──
@@ -7233,10 +7235,10 @@ function App() {
           setNotifications(n=>[{ id:`notif_react_post_${targetId}_${emoji}_${Date.now()}`, type:"reaction_post", fromUser:currentUser.username, postId:post.id, postTitle:post.title, emoji, time:"just now", read:false }, ...n]);
         }
         // Add to Supabase
-        if (userId) supabase.from("post_reactions").insert({ post_id:targetId, user_id:userId, username:currentUser.username, emoji }).catch(()=>{});
+        if (userId) supabase.from("post_reactions").insert({ post_id:targetId, user_id:userId, username:currentUser.username, emoji }).then(({error})=>{if(error)console.warn("[post_reactions]",error.message);});
       } else {
         // Remove from Supabase
-        if (userId) supabase.from("post_reactions").delete().eq("post_id",targetId).eq("user_id",userId).eq("emoji",emoji).catch(()=>{});
+        if (userId) supabase.from("post_reactions").delete().eq("post_id",targetId).eq("user_id",userId).eq("emoji",emoji).then(({error})=>{if(error)console.warn("[post_reactions del]",error.message);});
       }
       return { ...prev, [targetId]:{ ...(prev[targetId]||{}), [emoji]: has ? cur.filter(u=>u!==currentUser.username) : [...cur,currentUser.username] } };
     });
@@ -7255,9 +7257,9 @@ function App() {
           const post = forumPosts.find(p=>p.id===reply.postId);
           setNotifications(n=>[{ id:`notif_react_reply_${targetId}_${emoji}_${Date.now()}`, type:"reaction_reply", fromUser:currentUser.username, postId:reply.postId, postTitle:post?.title??"a post", preview:reply.body.slice(0,60), emoji, time:"just now", read:false }, ...n]);
         }
-        if (userId) supabase.from("reply_reactions").insert({ reply_id:targetId, user_id:userId, username:currentUser.username, emoji }).catch(()=>{});
+        if (userId) supabase.from("reply_reactions").insert({ reply_id:targetId, user_id:userId, username:currentUser.username, emoji }).then(({error})=>{if(error)console.warn("[reply_reactions]",error.message);});
       } else {
-        if (userId) supabase.from("reply_reactions").delete().eq("reply_id",targetId).eq("user_id",userId).eq("emoji",emoji).catch(()=>{});
+        if (userId) supabase.from("reply_reactions").delete().eq("reply_id",targetId).eq("user_id",userId).eq("emoji",emoji).then(({error})=>{if(error)console.warn("[reply_reactions del]",error.message);});
       }
       return { ...prev, [targetId]:{ ...(prev[targetId]||{}), [emoji]: has ? cur.filter(u=>u!==currentUser.username) : [...cur,currentUser.username] } };
     });
