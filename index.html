@@ -336,10 +336,10 @@ function calcConfidence(subs) {
   return           { label:"Low",    color:"#f87171", pct:25,  desc:`Only ${n} verified submission${n!==1?"s":""}.` };
 }
 function calcTier(avg,rarity) {
-  if (rarity==="Artifact")                                    return "S";
-  if (rarity==="Legendary" && avg>=10000)                    return "A";
+  if (rarity==="Artifact")                                     return "S";
+  if (rarity==="Legendary" && avg>=10000)                     return "A";
   if (rarity==="Legendary" || (rarity==="Rare" && avg>=5000)) return "B";
-  if (rarity==="Rare" || rarity==="Uncommon")                return "C";
+  if (rarity==="Rare" || rarity==="Uncommon")                 return "C";
   return "D";
 }
 function canUserVote(account) {
@@ -6265,7 +6265,12 @@ function TradeSide({ label, allSkins, side, onChange }) {
   const dropRef  = useRef(null);
 
   const filtered = query.trim().length > 0
-    ? allSkins.filter(s => s.name.toLowerCase().includes(query.toLowerCase()) || s.weapon.toLowerCase().includes(query.toLowerCase()))
+    ? allSkins.filter(s => {
+        const q = query.toLowerCase();
+        const combined = `${s.name} ${s.specificWeapon}`.toLowerCase();
+        const combined2 = `${s.specificWeapon} ${s.name}`.toLowerCase();
+        return s.name.toLowerCase().includes(q) || s.weapon.toLowerCase().includes(q) || s.specificWeapon?.toLowerCase().includes(q) || combined.includes(q) || combined2.includes(q);
+      })
     : allSkins;
 
   // Close dropdown on outside click
@@ -7341,7 +7346,13 @@ function App() {
     .filter(s=>weapon==="All"||s.specificWeapon===weapon)
     .filter(s=>rarity==="All"||s.rarity===rarity)
     .filter(s=>tier==="All"||s.tier===tier)
-    .filter(s=>s.name.toLowerCase().includes(search.toLowerCase()))
+    .filter(s=>{
+      const q = search.toLowerCase();
+      if (!q) return true;
+      const combined = `${s.name} ${s.specificWeapon}`.toLowerCase();
+      const combined2 = `${s.specificWeapon} ${s.name}`.toLowerCase();
+      return s.name.toLowerCase().includes(q) || s.specificWeapon?.toLowerCase().includes(q) || combined.includes(q) || combined2.includes(q);
+    })
     .sort((a,b)=>{
       const av=a.val?.avg??0,bv=b.val?.avg??0;
       if(sort==="value-desc")  return bv-av;
@@ -7366,7 +7377,12 @@ function App() {
   const searchRef = useState(null);
 
   const trimQ = globalQ.trim().toLowerCase();
-  const skinResults   = trimQ.length>0 ? allSkins.filter(s=>s.name.toLowerCase().includes(trimQ)||s.specificWeapon?.toLowerCase().includes(trimQ)).slice(0,5) : [];
+  const skinResults   = trimQ.length>0 ? allSkins.filter(s=>{
+    const q = trimQ.toLowerCase();
+    const combined = `${s.name} ${s.specificWeapon}`.toLowerCase();
+    const combined2 = `${s.specificWeapon} ${s.name}`.toLowerCase();
+    return s.name.toLowerCase().includes(q) || s.specificWeapon?.toLowerCase().includes(q) || combined.includes(q) || combined2.includes(q);
+  }).slice(0,5) : [];
   const memberResults = trimQ.length>0 ? Object.keys(profiles).filter(u=>u.toLowerCase().includes(trimQ)).slice(0,4) : [];
   const postResults   = trimQ.length>0 ? forumPosts.filter(p=>p.title.toLowerCase().includes(trimQ)||p.user.toLowerCase().includes(trimQ)).slice(0,4) : [];
   const hasResults    = skinResults.length>0 || memberResults.length>0 || postResults.length>0;
