@@ -7377,12 +7377,14 @@ function App() {
   const searchRef = useState(null);
 
   const trimQ = globalQ.trim().toLowerCase();
-  const skinResults   = trimQ.length>0 ? allSkins.filter(s=>{
+  const allSkinResults = trimQ.length>0 ? allSkins.filter(s=>{
     const q = trimQ.toLowerCase();
     const combined = `${s.name} ${s.specificWeapon}`.toLowerCase();
     const combined2 = `${s.specificWeapon} ${s.name}`.toLowerCase();
     return s.name.toLowerCase().includes(q) || s.specificWeapon?.toLowerCase().includes(q) || combined.includes(q) || combined2.includes(q);
-  }).slice(0,5) : [];
+  }) : [];
+  const skinResults   = allSkinResults.slice(0,5);
+  const skinOverflow  = allSkinResults.length > 5;
   const memberResults = trimQ.length>0 ? Object.keys(profiles).filter(u=>u.toLowerCase().includes(trimQ)).slice(0,4) : [];
   const postResults   = trimQ.length>0 ? forumPosts.filter(p=>p.title.toLowerCase().includes(trimQ)||p.user.toLowerCase().includes(trimQ)).slice(0,4) : [];
   const hasResults    = skinResults.length>0 || memberResults.length>0 || postResults.length>0;
@@ -7496,6 +7498,12 @@ function App() {
                       </div>
                     );
                   })}
+                  {skinOverflow && (
+                    <div onClick={()=>{ setSearch(globalQ.trim()); setTab("tracker"); setActiveSkin(null); setViewingProfile(null); closeSearch(); }}
+                      className="sr-row" style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"10px 16px",cursor:"pointer",background:"rgba(249,115,22,0.04)",borderTop:"1px solid #1e1e1e",transition:"background 0.1s"}}>
+                      <span style={{fontSize:12,fontWeight:700,color:"#f97316"}}>View all {allSkinResults.length} skins →</span>
+                    </div>
+                  )}
                 </div>
               )}
               {memberResults.length>0 && (
