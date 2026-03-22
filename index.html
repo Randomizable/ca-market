@@ -6637,6 +6637,19 @@ function TradeCalculator({ allSkins, onGoSkin }) {
   );
 }
 
+// Normalise a raw chat_messages DB row into app format
+const normaliseMsg = m => {
+  const isGif = m.text?.startsWith("__gif__");
+  return {
+    id: m.id,
+    user: m.username,
+    text: isGif ? null : m.text,
+    gif: isGif ? m.text.slice(7) : null,
+    reactions: m.reactions || {},
+    time: new Date(m.created_at).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" }),
+  };
+};
+
 function App() {
   const [siteMode,     setSiteMode]     = useState("live"); // "live" | "coming_soon" | "maintenance"
   const [siteLoading,  setSiteLoading]  = useState(true);  // true until site_config is fetched
@@ -6908,18 +6921,6 @@ function App() {
       setFrozen(frozenMap);
     });
   }, []);
-
-  const normaliseMsg = m => {
-    const isGif = m.text?.startsWith("__gif__");
-    return {
-      id: m.id,
-      user: m.username,
-      text: isGif ? null : m.text,
-      gif: isGif ? m.text.slice(7) : null,
-      reactions: m.reactions || {},
-      time: new Date(m.created_at).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" }),
-    };
-  };
 
   // ── Load chat messages ──
   useEffect(() => {
