@@ -165,7 +165,7 @@ const skinSubLabel = s => s.specificWeapon ? `${s.specificWeapon} · ${s.weapon}
 //  Each skin copy gets a unique serial number when acquired.
 //  Lower serials = rarer = higher value.
 // ─────────────────────────────────────────────────────────────
-const SERIAL_BRACKET_DEFAULTS = [
+const SERIAL_BRACKETS = [
   { id:"s1",     label:"#1",       range:[1,1],          mult:9.0,  color:"#f97316", desc:"The first ever copy. Unique." },
   { id:"s2-3",   label:"#2–3",     range:[2,3],          mult:8.0,  color:"#f59e0b", desc:"Extremely rare — top 3." },
   { id:"s4-9",   label:"#4–9",     range:[4,9],          mult:5.0,  color:"#fbbf24", desc:"Top 10 holders." },
@@ -175,8 +175,6 @@ const SERIAL_BRACKET_DEFAULTS = [
   { id:"s100",   label:"#100–250", range:[100,250],      mult:1.3,  color:"#60a5fa", desc:"Floor price range." },
   { id:"s251",   label:"#251+",    range:[251,Infinity], mult:1.0,  color:"#818cf8", desc:"Standard base value." },
 ];
-// SERIAL_BRACKETS is a live reference — App updates this when admin changes mults
-let SERIAL_BRACKETS = SERIAL_BRACKET_DEFAULTS.map(b => ({...b}));
 
 // Per-bracket submissions: { [skinId]: { [bracketId]: [{traderId,value,submittedAt,flagged}] } }
 const INIT_BRACKET_SUBS = {};
@@ -4247,8 +4245,179 @@ function SkinManagement({ skinsDB, setSkinsDB, log, allSkins }) {
   );
 }
 
+function PriceEntryPanel({ allSkins, bracketSubs, setBracketSubs, log }) {
+  const [skinQuery,    setSkinQuery]    = useState("");
+  const [selectedSkin, setSelectedSkin] = useState(null);
+  const [bracket,      setBracket]      = useState("s251");
+  const [price,        setPrice]        = useState("");
+  const [saving,       setSaving]       = useState(false);
+  const [msg,          setMsg]          = useState(null); // {text, ok}
 
-function AdminPage({ allSkins, submissions, setSubmissions, bracketSubs, setBracketSubs, disputes, setDisputes, frozen, setFrozen, forumPosts, setForumPosts, profiles, setProfiles, onViewProfile, onViewSkin, setNotifications, siteMode, setSiteMode, scamReports, setScamReports, confirmedScammers, setConfirmedScammers, communityVotes, setCommunityVotes, traderRequests, setTraderRequests, announcement, setAnnouncement, reportedPosts, setReportedPosts, adminLog, setAdminLog, skinsDB, setSkinsDB, serialMults, setSerialMults }) {
+  const filtered = skinQuery.trim().length > 1
+    ? allSkins.filter(s => {
+        const q = skinQuery.toLowerCase();
+        return `${s.name} ${s.specificWeapon}`.toLowerCase().includes(q) ||
+               `${s.specificWeapon} ${s.name}`.toLowerCase().includes(q);
+      }).slice(0, 8)
+    : [];
+
+  const selectedBracket = SERIAL_BRACKETS.find(b => b.id === bracket);
+  const currentBase     = selectedSkin?.val?.avg ?? null;
+  const impliedMult     = currentBase && price ? (parseFloat(price) / currentBase).toFixed(2) : null;
+
+  const handleSubmit = async () => {
+    if (!selectedSkin) { setMsg({text:"Select a skin first.", ok:false}); return; }
+    const val = parseFloat(price);
+    if (!val || val <= 0) { setMsg({text:"Enter a valid price.", ok:false}); return; }
+    setSaving(true); setMsg(null);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { setMsg({text:"Not logged in.", ok:false}); setSaving(false); return; }
+
+    if (bracket === "s251") {
+      // Base price — insert into submissions table
+      const { error } = await supabase.from("submissions").insert({
+        skin_id: selectedSkin.id, trader_id: "AdminUser", value: Math.round(val), flagged: false,
+        submitted_at: new Date().toISOString().split("T")[0],
+      });
+      if (error) { setMsg({text:`Error: ${error.message}`, ok:false}); setSaving(false); return; }
+    } else {
+      // Bracket price — insert into bracket_submissions table
+      const { error } = await supabase.from("bracket_submissions").insert({
+        skin_id: selectedSkin.id, trader_id: "AdminUser", bracket_id: bracket,
+        value: Math.round(val), flagged: false,
+        submitted_at: new Date().toISOString().split("T")[0],
+      });
+      if (error) { setMsg({text:`Error: ${error.message}`, ok:false}); setSaving(false); return; }
+      // Update local bracketSubs state
+      setBracketSubs(prev => {
+        const skinBrackets = { ...(prev[selectedSkin.id] || {}) };
+        const existing = skinBrackets[bracket] || [];
+        skinBrackets[bracket] = [...existing, { traderId:"AdminUser", value:Math.round(val), submittedAt:new Date().toISOString().split("T")[0], flagged:false }];
+        return { ...prev, [selectedSkin.id]: skinBrackets };
+      });
+    }
+
+    log(`Set verified price: ${selectedSkin.name} | ${selectedSkin.specificWeapon} — ${selectedBracket?.label ?? "Base"}: ${Math.round(val).toLocaleString()} coins`);
+    setMsg({text:`✓ Saved ${Math.round(val).toLocaleString()} coins for ${selectedSkin.name} | ${selectedSkin.specificWeapon} (${selectedBracket?.label ?? "Base"})`, ok:true});
+    setPrice("");
+    setSaving(false);
+  };
+
+  const sel = {background:"#111",border:"1px solid #252525",borderRadius:10,color:"#e0e0e0",fontFamily:"inherit",fontSize:13,padding:"9px 13px",outline:"none",width:"100%",boxSizing:"border-box"};
+
+  return (
+    <div>
+      <Panel style={{marginBottom:16}}>
+        <SectionLabel>Add Verified Price</SectionLabel>
+        <div style={{fontSize:12,color:"#555",marginTop:6,marginBottom:18,lineHeight:1.6}}>
+          Set a verified price for any skin and serial bracket. This is added as an AdminUser submission and counts toward the price calculation immediately.
+        </div>
+
+        {/* Skin search */}
+        <div style={{marginBottom:12}}>
+          <div style={{fontSize:11,color:"#555",marginBottom:6}}>Skin</div>
+          {selectedSkin ? (
+            <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"#0e0e0e",border:"1px solid #f9731640",borderRadius:10}}>
+              <span style={{fontSize:20}}>{selectedSkin.emoji}</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:700,color:"#e0e0e0"}}>{selectedSkin.name} | {selectedSkin.specificWeapon}</div>
+                <div style={{fontSize:11,color:"#555"}}>{selectedSkin.rarity} · {selectedSkin.weapon}{currentBase ? ` · Current base: ${Math.round(currentBase).toLocaleString()} coins` : " · No base price yet"}</div>
+              </div>
+              <button onClick={()=>{setSelectedSkin(null);setSkinQuery("");setMsg(null);}}
+                style={{background:"none",border:"none",color:"#555",cursor:"pointer",fontFamily:"inherit",fontSize:12}}>✕ Change</button>
+            </div>
+          ) : (
+            <div style={{position:"relative"}}>
+              <input style={sel} placeholder="Search skin name or weapon…" value={skinQuery}
+                onChange={e=>{setSkinQuery(e.target.value);setMsg(null);}}
+                autoComplete="off"/>
+              {filtered.length > 0 && (
+                <div style={{position:"absolute",top:"100%",left:0,right:0,background:"#141414",border:"1px solid #252525",borderRadius:10,zIndex:50,marginTop:4,overflow:"hidden",boxShadow:"0 8px 24px rgba(0,0,0,0.5)"}}>
+                  {filtered.map(s => (
+                    <div key={s.id} onClick={()=>{setSelectedSkin(s);setSkinQuery("");}}
+                      style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",cursor:"pointer",borderBottom:"1px solid #1a1a1a",transition:"background 0.1s"}}
+                      onMouseEnter={e=>e.currentTarget.style.background="#1e1e1e"}
+                      onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                      <span style={{fontSize:16}}>{s.emoji}</span>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:600,color:"#e0e0e0"}}>{s.name} | {s.specificWeapon}</div>
+                        <div style={{fontSize:11,color:"#555"}}>{s.rarity} · {s.weapon}</div>
+                      </div>
+                      {s.val && <span style={{marginLeft:"auto",fontSize:12,color:"#555"}}>{Math.round(s.val.avg).toLocaleString()}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Bracket selector */}
+        <div style={{marginBottom:12}}>
+          <div style={{fontSize:11,color:"#555",marginBottom:6}}>Serial Bracket</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+            {SERIAL_BRACKETS.map(b => (
+              <button key={b.id} onClick={()=>setBracket(b.id)}
+                style={{background:bracket===b.id?b.color+"18":"#111",border:`1px solid ${bracket===b.id?b.color:"#252525"}`,borderRadius:8,color:bracket===b.id?b.color:"#555",cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:700,padding:"7px 6px",transition:"all 0.15s",textAlign:"center"}}>
+                {b.label}
+              </button>
+            ))}
+          </div>
+          {selectedBracket && (
+            <div style={{fontSize:11,color:"#444",marginTop:6}}>{selectedBracket.desc}{currentBase ? ` · Recommended: ${Math.round(currentBase * selectedBracket.mult).toLocaleString()} coins (${selectedBracket.mult}×)` : ""}</div>
+          )}
+        </div>
+
+        {/* Price input */}
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,color:"#555",marginBottom:6}}>Verified Price (coins)</div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <input type="number" style={{...sel,width:"200px"}} placeholder="e.g. 150000"
+              value={price} min={1} onChange={e=>setPrice(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&handleSubmit()}/>
+            {impliedMult && currentBase && (
+              <span style={{fontSize:12,color:"#555"}}>= {impliedMult}× base</span>
+            )}
+          </div>
+        </div>
+
+        {msg && <div style={{marginBottom:12,fontSize:12,color:msg.ok?"#4ade80":"#f87171",padding:"8px 12px",background:msg.ok?"rgba(74,222,128,0.06)":"rgba(248,113,113,0.06)",borderRadius:8,border:`1px solid ${msg.ok?"#4ade8030":"#f8717130"}`}}>{msg.text}</div>}
+
+        <ActionBtn label={saving?"Saving…":"Save Verified Price"} color="#4ade80" onClick={handleSubmit} disabled={saving}/>
+      </Panel>
+
+      {/* Recent admin prices */}
+      {selectedSkin && (
+        <Panel>
+          <SectionLabel>Current Prices for {selectedSkin.name} | {selectedSkin.specificWeapon}</SectionLabel>
+          <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:10}}>
+            {SERIAL_BRACKETS.map(b => {
+              const bv = selectedSkin.val ? (() => {
+                const bSubs = (bracketSubs[selectedSkin.id]?.[b.id] || []).filter(s=>!s.flagged);
+                if (bSubs.length > 0) {
+                  const avg = Math.round(bSubs.reduce((a,s)=>a+s.value,0)/bSubs.length);
+                  return { value: avg, verified: true, count: bSubs.length };
+                }
+                const base = selectedSkin.val?.avg ?? 0;
+                return { value: Math.round(base * b.mult), verified: false, count: 0 };
+              })() : null;
+              return (
+                <div key={b.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"#111",borderRadius:8}}>
+                  <div style={{width:6,height:6,borderRadius:"50%",background:b.color,flexShrink:0}}/>
+                  <span style={{fontSize:12,color:"#888",width:80,flexShrink:0}}>{b.label}</span>
+                  <span style={{fontSize:13,fontWeight:700,color:"#e0e0e0",flex:1}}>{bv ? bv.value.toLocaleString() : "—"} coins</span>
+                  {bv && <span style={{fontSize:10,color:bv.verified?"#4ade80":"#555",fontWeight:600}}>{bv.verified?`✓ ${bv.count} sub${bv.count!==1?"s":""}`:"recommended"}</span>}
+                </div>
+              );
+            })}
+          </div>
+        </Panel>
+      )}
+    </div>
+  );
+}
+
+function AdminPage({ allSkins, submissions, setSubmissions, bracketSubs, setBracketSubs, disputes, setDisputes, frozen, setFrozen, forumPosts, setForumPosts, profiles, setProfiles, onViewProfile, onViewSkin, setNotifications, siteMode, setSiteMode, scamReports, setScamReports, confirmedScammers, setConfirmedScammers, communityVotes, setCommunityVotes, traderRequests, setTraderRequests, announcement, setAnnouncement, reportedPosts, setReportedPosts, adminLog, setAdminLog, skinsDB, setSkinsDB }) {
   const [activeSection, setActiveSection] = useState("sitemode");
   const [dismissed,     setDismissed]     = useState(new Set());
   const [announceInput, setAnnounceInput] = useState("");
@@ -5524,105 +5693,11 @@ function AdminPage({ allSkins, submissions, setSubmissions, bracketSubs, setBrac
       {activeSection==="skins" && <SkinManagement skinsDB={skinsDB} setSkinsDB={setSkinsDB} log={log} allSkins={allSkins}/>}
 
       {/* ── SERIAL PRICING ── */}
-      {activeSection==="pricing" && (()=>{
-        const [localMults, setLocalMults] = React.useState({...serialMults});
-        const [saving, setSaving] = React.useState(false);
-        const [saved, setSaved] = React.useState(false);
-        const hasChanges = SERIAL_BRACKET_DEFAULTS.some(b => localMults[b.id] !== serialMults[b.id]);
-        const inp = {background:"#111",border:"1px solid #252525",borderRadius:8,color:"#e0e0e0",fontFamily:"inherit",fontSize:13,fontWeight:700,padding:"7px 10px",outline:"none",width:"80px",textAlign:"center"};
 
-        const handleSave = async () => {
-          setSaving(true);
-          const newMults = {...localMults};
-          // Update global SERIAL_BRACKETS immediately
-          SERIAL_BRACKETS = SERIAL_BRACKET_DEFAULTS.map(b => ({ ...b, mult: newMults[b.id] ?? b.mult }));
-          setSerialMults(newMults);
-          log("Updated serial bracket multipliers");
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session) {
-            await supabase.from("site_config").upsert({ key:"serial_mults", value: JSON.stringify(newMults) });
-          }
-          setSaving(false); setSaved(true);
-          setTimeout(() => setSaved(false), 2000);
-        };
-
-        const handleReset = () => {
-          const defaults = {};
-          SERIAL_BRACKET_DEFAULTS.forEach(b => { defaults[b.id] = b.mult; });
-          setLocalMults(defaults);
-        };
-
-        return (
-          <div>
-            <Panel style={{marginBottom:16}}>
-              <SectionLabel>Serial Bracket Multipliers</SectionLabel>
-              <div style={{fontSize:12,color:"#555",marginTop:6,marginBottom:20,lineHeight:1.6}}>
-                These multipliers apply to the s251+ base price. Changing them updates recommended prices across the entire tracker instantly for all users.
-              </div>
-              <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                {SERIAL_BRACKET_DEFAULTS.map(b => {
-                  const current = localMults[b.id] ?? b.mult;
-                  const changed = current !== serialMults[b.id];
-                  const baseExample = 100000;
-                  const implied = Math.round(baseExample * current).toLocaleString();
-                  return (
-                    <div key={b.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",background:"#111",borderRadius:12,border:`1px solid ${changed?"#f9731640":"#1e1e1e"}`,transition:"border-color 0.2s"}}>
-                      <div style={{width:8,height:8,borderRadius:"50%",background:b.color,flexShrink:0,boxShadow:`0 0 6px ${b.color}88`}}/>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:13,fontWeight:700,color:"#e0e0e0"}}>{b.label}</div>
-                        <div style={{fontSize:11,color:"#555",marginTop:1}}>{b.desc}</div>
-                      </div>
-                      <div style={{fontSize:11,color:"#444",textAlign:"right",minWidth:80}}>
-                        <div style={{color:"#333"}}>e.g. 100k base</div>
-                        <div style={{color:b.color,fontWeight:700}}>→ {implied}</div>
-                      </div>
-                      <div style={{display:"flex",alignItems:"center",gap:6}}>
-                        <input type="number" style={{...inp,borderColor:changed?"#f97316":"#252525"}}
-                          value={current} min={0.1} max={100} step={0.05}
-                          onChange={e => {
-                            const v = parseFloat(e.target.value);
-                            if (!isNaN(v) && v > 0) setLocalMults(prev => ({...prev,[b.id]:v}));
-                          }}/>
-                        <span style={{fontSize:12,color:"#555"}}>×</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div style={{display:"flex",gap:8,marginTop:16,alignItems:"center"}}>
-                <button onClick={handleSave} disabled={saving||!hasChanges}
-                  style={{background:hasChanges?"linear-gradient(135deg,#f97316,#c2410c)":"#1a1a1a",border:"none",borderRadius:10,color:hasChanges?"#000":"#444",cursor:hasChanges?"pointer":"default",fontFamily:"inherit",fontSize:13,fontWeight:700,padding:"10px 24px",transition:"all 0.2s"}}>
-                  {saving?"Saving…":saved?"✓ Saved":"Save Changes"}
-                </button>
-                <button onClick={handleReset}
-                  style={{background:"transparent",border:"1px solid #252525",borderRadius:10,color:"#555",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,padding:"10px 16px"}}>
-                  Reset to defaults
-                </button>
-                {hasChanges && <span style={{fontSize:12,color:"#f97316"}}>Unsaved changes</span>}
-              </div>
-            </Panel>
-
-            {/* Preview panel */}
-            <Panel>
-              <SectionLabel>Live Preview</SectionLabel>
-              <div style={{fontSize:12,color:"#555",marginBottom:14,marginTop:6}}>How the brackets look with current multipliers for a 100,000 coin base skin.</div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:8}}>
-                {SERIAL_BRACKET_DEFAULTS.map(b => {
-                  const mult = localMults[b.id] ?? b.mult;
-                  const val = Math.round(100000 * mult);
-                  return (
-                    <div key={b.id} style={{background:"#0e0e0e",border:`1px solid ${b.color}30`,borderRadius:10,padding:"10px 12px"}}>
-                      <div style={{fontSize:10,fontWeight:700,color:b.color,marginBottom:4}}>{b.label}</div>
-                      <div style={{fontSize:16,fontWeight:800,color:"#e0e0e0"}}>{val>=1000000?`${(val/1000000).toFixed(1)}M`:val>=1000?`${(val/1000).toFixed(0)}k`:val}</div>
-                      <div style={{fontSize:10,color:"#444",marginTop:2}}>{mult}×</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </Panel>
-          </div>
-        );
-      })()}
+      {/* ── PRICE ENTRY ── */}
+      {activeSection==="pricing" && (
+        <PriceEntryPanel allSkins={allSkins} bracketSubs={bracketSubs} setBracketSubs={setBracketSubs} log={log}/>
+      )}
 
       {/* ── ACTIVITY LOG ── */}
       {activeSection==="log" && (
@@ -6795,9 +6870,6 @@ function App() {
   const [reportedPosts,  setReportedPosts]  = useState([]);
   const [adminLog,       setAdminLog]       = useState([]);
   const [skinsDB,        setSkinsDB]        = useState(SKINS_DB);
-  const [serialMults,    setSerialMults]    = useState(() => {
-    const m = {}; SERIAL_BRACKET_DEFAULTS.forEach(b => { m[b.id] = b.mult; }); return m;
-  });
   const [scamReports,       setScamReports]       = useState([]);
   const [confirmedScammers, setConfirmedScammers] = useState([]);
   const [profiles,     setProfiles]    = useState(INIT_PROFILES);
@@ -6829,31 +6901,6 @@ function App() {
     return () => supabase.removeChannel(channel);
   }, []);
 
-  // ── Load serial mults from Supabase and keep SERIAL_BRACKETS in sync ──
-  useEffect(() => {
-    supabase.from("site_config").select("value").eq("key", "serial_mults").single()
-      .then(({ data }) => {
-        if (!data?.value) return;
-        try {
-          const mults = JSON.parse(data.value);
-          setSerialMults(mults);
-          // Sync global SERIAL_BRACKETS so getBracketValue/serialValue use updated mults
-          SERIAL_BRACKETS = SERIAL_BRACKET_DEFAULTS.map(b => ({ ...b, mult: mults[b.id] ?? b.mult }));
-        } catch {}
-      });
-    // Real-time: update mults if another admin session changes them
-    const ch = supabase.channel("serial_mults_realtime")
-      .on("postgres_changes", { event:"UPDATE", schema:"public", table:"site_config", filter:"key=eq.serial_mults" },
-        payload => {
-          try {
-            const mults = JSON.parse(payload.new.value);
-            setSerialMults(mults);
-            SERIAL_BRACKETS = SERIAL_BRACKET_DEFAULTS.map(b => ({ ...b, mult: mults[b.id] ?? b.mult }));
-          } catch {}
-        })
-      .subscribe();
-    return () => supabase.removeChannel(ch);
-  }, []);
 
   // ── Load skins from Supabase ──
   useEffect(() => {
@@ -8128,7 +8175,6 @@ function App() {
             reportedPosts={reportedPosts} setReportedPosts={setReportedPosts}
             adminLog={adminLog} setAdminLog={setAdminLog}
             skinsDB={skinsDB} setSkinsDB={setSkinsDB}
-            serialMults={serialMults} setSerialMults={setSerialMults}
             communityVotes={communityVotes} setCommunityVotes={setCommunityVotes}
             traderRequests={traderRequests} setTraderRequests={setTraderRequests}
           />
