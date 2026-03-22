@@ -5737,16 +5737,34 @@ function LiveChat({ currentUser, profiles, messages, setMessages }) {
     const text = input.trim();
     if (!text || !currentUser) return;
     setInput("");
-    const userId = (await supabase.auth.getUser()).data.user?.id;
-    if (userId) await supabase.from("chat_messages").insert({ user_id:userId, username:currentUser.username, text });
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    // Optimistic update so sender sees message instantly
+    const tempId = `temp_${Date.now()}`;
+    const tempMsg = { id:tempId, user:currentUser.username, text, gif:null, reactions:{}, time:nowTime() };
+    setMessages(prev => [...prev, tempMsg].slice(-50));
+    const { data, error } = await supabase.from("chat_messages").insert({
+      user_id: session.user.id, username: currentUser.username, text,
+    }).select().single();
+    if (error) {
+      console.warn("[chat send]", error.message);
+      // Remove optimistic message on failure
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+    } else if (data) {
+      // Replace temp with real ID to prevent duplicate when realtime fires
+      setMessages(prev => prev.map(m => m.id === tempId ? normaliseMsg(data) : m));
+    }
   };
 
-  const sendGif = (gif) => {
+  const sendGif = async (gif) => {
     if (!currentUser) return;
     const url = gif.media_formats?.gif?.url || gif.media_formats?.mediumgif?.url;
-    const msg = { id:`cm${Date.now()}`, user:currentUser.username, gif:url, time:nowTime(), reactions:{} };
-    setMessages(prev => [...prev, msg]);
     setShowGif(false); setGifQ("");
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    await supabase.from("chat_messages").insert({
+      user_id: session.user.id, username: currentUser.username, text: `__gif__${url}`,
+    });
   };
 
   const toggleReact = (msgId, emoji) => {
@@ -6891,22 +6909,32 @@ function App() {
     });
   }, []);
 
+  const normaliseMsg = m => {
+    const isGif = m.text?.startsWith("__gif__");
+    return {
+      id: m.id,
+      user: m.username,
+      text: isGif ? null : m.text,
+      gif: isGif ? m.text.slice(7) : null,
+      reactions: m.reactions || {},
+      time: new Date(m.created_at).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" }),
+    };
+  };
+
   // ── Load chat messages ──
   useEffect(() => {
     supabase.from("chat_messages").select("*").order("created_at", { ascending: true }).limit(50).then(({ data }) => {
-      if (data) setChatMessages(data.map(m => ({
-        id: m.id, user: m.username, text: m.text, reactions: m.reactions || {},
-        time: new Date(m.created_at).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" }),
-      })));
+      if (data) setChatMessages(data.map(normaliseMsg));
     });
     // Real-time chat
     const chatChannel = supabase.channel("chat_realtime")
       .on("postgres_changes", { event:"INSERT", schema:"public", table:"chat_messages" }, payload => {
-        const m = payload.new;
-        setChatMessages(prev => [...prev, {
-          id: m.id, user: m.username, text: m.text, reactions: m.reactions || {},
-          time: new Date(m.created_at).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" }),
-        }].slice(-50));
+        const newMsg = normaliseMsg(payload.new);
+        setChatMessages(prev => {
+          // Skip if already in state (optimistic update already placed it)
+          if (prev.some(m => m.id === newMsg.id)) return prev;
+          return [...prev, newMsg].slice(-50);
+        });
       })
       .subscribe();
     return () => supabase.removeChannel(chatChannel);
@@ -7012,7 +7040,7 @@ function App() {
       return { ...prev, [skinId]: nd };
     });
     // Persist to Supabase
-    const userId = (await supabase.auth.getUser()).data.user?.id;
+    const { data: { session: _sess } } = await supabase.auth.getSession(); const userId = _sess?.user?.id;
     if (!userId) return;
     const nd = (userVotes[skinId] ?? 0) === dir ? 0 : dir;
     if (nd === 0) {
@@ -7155,7 +7183,7 @@ function App() {
     setTraderRequests(prev => [...prev, req]);
     showToast("Your Trusted Trader application has been submitted!", "success");
     // Persist to Supabase
-    const userId = (await supabase.auth.getUser()).data.user?.id;
+    const { data: { session: _sess } } = await supabase.auth.getSession(); const userId = _sess?.user?.id;
     if (userId) await supabase.from("trader_requests").insert({ user_id:userId, username:currentUser.username, reputation:p.reputation, joined_days:p.joinedDaysAgo, post_count:posts });
   }, [currentUser, profiles, forumPosts, traderRequests, showToast]);
 
@@ -7185,7 +7213,7 @@ function App() {
   }, [frozen, currentUser]);
   const handleDispute = useCallback(async (skinId, reason) => {
     setDisputes(prev => ({ ...prev, [skinId]: [...(prev[skinId]||[]), { user:currentUser.username, reason, time:"just now" }] }));
-    const userId = (await supabase.auth.getUser()).data.user?.id;
+    const { data: { session: _sess } } = await supabase.auth.getSession(); const userId = _sess?.user?.id;
     if (userId) await supabase.from("disputes").insert({ skin_id:skinId, user_id:userId, username:currentUser.username, reason });
   }, [currentUser]);
 
@@ -7218,7 +7246,7 @@ function App() {
       return {...p, replies:p.replies+1};
     }));
     // Persist to Supabase
-    const userId = (await supabase.auth.getUser()).data.user?.id;
+    const { data: { session: _sess } } = await supabase.auth.getSession(); const userId = _sess?.user?.id;
     if (userId) {
       await supabase.from("forum_replies").insert({
         post_id: postId, user_id: userId,
@@ -7230,7 +7258,7 @@ function App() {
 
   const handleReactPost = useCallback(async (targetId, emoji) => {
     if (!currentUser) return;
-    const userId = (await supabase.auth.getUser()).data.user?.id;
+    const { data: { session: _sess } } = await supabase.auth.getSession(); const userId = _sess?.user?.id;
     setPostReactions(prev => {
       const cur = prev[targetId]?.[emoji] || [];
       const has = cur.includes(currentUser.username);
@@ -7251,7 +7279,7 @@ function App() {
 
   const handleReactReply = useCallback(async (targetId, emoji) => {
     if (!currentUser) return;
-    const userId = (await supabase.auth.getUser()).data.user?.id;
+    const { data: { session: _sess } } = await supabase.auth.getSession(); const userId = _sess?.user?.id;
     setReplyReactions(prev => {
       const cur = prev[targetId]?.[emoji] || [];
       const has = cur.includes(currentUser.username);
@@ -7272,7 +7300,7 @@ function App() {
 
   const handleNewPost = useCallback(async post => {
     const { data: saved, error } = await supabase.from("forum_posts").insert({
-      user_id: (await supabase.auth.getUser()).data.user?.id,
+      user_id: (await supabase.auth.getSession()).data.session?.user?.id,
       username: post.user,
       title: post.title,
       body: sanitiseHTML(post.body),
