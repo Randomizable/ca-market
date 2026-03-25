@@ -7004,10 +7004,15 @@ function App() {
       .then(({ data, error }) => {
         if (error) console.warn("[site_config load]", error.message);
         if (data?.value) setSiteMode(data.value);
-        // If no auth token in URL, we can show the site immediately
+        if (!hasAuthToken) setSiteLoading(false);
+      })
+      .catch(() => {
         if (!hasAuthToken) setSiteLoading(false);
       });
 
+    // Hard fallback — loading never gets stuck for more than 2s
+    const fallback = setTimeout(() => setSiteLoading(false), 2000);
+    
     // If there's an auth token, wait for auth state to resolve before showing site
     if (hasAuthToken) {
       const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
@@ -7027,7 +7032,7 @@ function App() {
       .on("postgres_changes", { event:"UPDATE", schema:"public", table:"site_config", filter:"key=eq.site_mode" },
         payload => { setSiteMode(payload.new.value); })
       .subscribe();
-    return () => supabase.removeChannel(channel);
+    return () => { supabase.removeChannel(channel); clearTimeout(fallback); };
   }, []);
 
 
