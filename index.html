@@ -6993,40 +6993,17 @@ function App() {
   const allSkins = useMemo(()=>buildSkins(skinsDB,submissions,votes,frozen,bracketSubs),[skinsDB,submissions,votes,frozen,bracketSubs]);
 
   // ── Load site mode from Supabase (first thing, before rendering) ──
-  // If URL has an auth token (password reset / email confirm), stay in loading
-  // state until onAuthStateChange fires and we know if the user is admin
   useEffect(() => {
-    const hasAuthToken = window.location.hash.includes("access_token") ||
-                         window.location.hash.includes("type=recovery") ||
-                         window.location.search.includes("token_hash");
-
     supabase.from("site_config").select("value").eq("key", "site_mode").single()
       .then(({ data, error }) => {
         if (error) console.warn("[site_config load]", error.message);
         if (data?.value) setSiteMode(data.value);
-        if (!hasAuthToken) setSiteLoading(false);
+        setSiteLoading(false);
       })
-      .catch(() => {
-        if (!hasAuthToken) setSiteLoading(false);
-      });
+      .catch(() => setSiteLoading(false));
 
     // Hard fallback — loading never gets stuck for more than 2s
     const fallback = setTimeout(() => setSiteLoading(false), 2000);
-    
-    // If there's an auth token, wait for auth state to resolve before showing site
-    if (hasAuthToken) {
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-        if (event === "PASSWORD_RECOVERY") {
-          setShowPasswordReset(true);
-          setSiteLoading(false);
-          subscription.unsubscribe();
-        } else if (event === "SIGNED_IN") {
-          setTimeout(() => setSiteLoading(false), 300);
-          subscription.unsubscribe();
-        }
-      });
-      setTimeout(() => setSiteLoading(false), 3000);
-    }
 
     const channel = supabase.channel("site_config_realtime")
       .on("postgres_changes", { event:"UPDATE", schema:"public", table:"site_config", filter:"key=eq.site_mode" },
@@ -7049,36 +7026,27 @@ function App() {
   }, []);
 
   // ── Restore Supabase session on mount ──
-  // Also handles password reset / email confirm links (access_token in URL hash)
   useEffect(() => {
-    const loadProfile = async (session) => {
-      if (!session) return;
-      const { data: profile } = await supabase.from("profiles").select("*").eq("id", session.user.id).single();
-      if (profile) {
-        const acc = normaliseProfile(profile);
-        setProfiles(prev => ({ ...prev, [acc.username]: acc }));
-        setCurrentUser(acc);
-      }
-    };
-
-    // Listen for auth state changes — catches recovery token logins
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === "PASSWORD_RECOVERY") {
-        // Show password reset screen instead of logging in normally
-        setShowPasswordReset(true);
-        setSiteLoading(false);
-        return;
-      }
-      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
-        await loadProfile(session);
-      }
-      if (event === "SIGNED_OUT") {
-        setCurrentUser(null);
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        supabase.from("profiles").select("*").eq("id", session.user.id).single()
+          .then(({ data: profile }) => {
+            if (profile) {
+              const acc = normaliseProfile(profile);
+              setProfiles(prev => ({ ...prev, [acc.username]: acc }));
+              setCurrentUser(acc);
+            }
+          });
       }
     });
 
-    // Also try restoring existing session on mount
-    supabase.auth.getSession().then(({ data: { session } }) => loadProfile(session));
+    // Only use onAuthStateChange to catch password recovery tokens
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setShowPasswordReset(true);
+        setSiteLoading(false);
+      }
+    });
 
     return () => subscription.unsubscribe();
   }, []);
