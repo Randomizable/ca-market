@@ -7030,11 +7030,15 @@ function App() {
     const channel = supabase.channel("forum_posts_realtime")
       .on("postgres_changes", { event:"INSERT", schema:"public", table:"forum_posts" }, payload => {
         const p = payload.new;
-        setForumPosts(prev => [{
-          id: p.id, user: p.username, title: p.title, body: p.body,
-          tag: p.tag, pinned: p.pinned, views: p.views, replies: p.reply_count,
-          richText: p.rich_text, poll: p.poll, time: "just now", _created: p.created_at,
-        }, ...prev]);
+        setForumPosts(prev => {
+          // Skip if already in state (posted by this session)
+          if (prev.some(x => x.id === p.id)) return prev;
+          return [{
+            id: p.id, user: p.username, title: p.title, body: p.body,
+            tag: p.tag, pinned: p.pinned, views: p.views, replies: p.reply_count,
+            richText: p.rich_text, poll: p.poll, time: "just now", _created: p.created_at,
+          }, ...prev];
+        });
       })
       .subscribe();
     return () => supabase.removeChannel(channel);
@@ -7414,12 +7418,34 @@ function App() {
   },[]);
 
   const handleAddReply = useCallback(async (postId, {body,image,gif}) => {
+    // Persist to Supabase first, get real ID back
+    const { data: { session: _sess } } = await supabase.auth.getSession();
+    const userId = _sess?.user?.id;
+    if (!userId) return;
+
+    const { data: saved, error } = await supabase.from("forum_replies").insert({
+      post_id: postId, user_id: userId,
+      username: currentUser.username, body,
+      image_url: image || null, gif_url: gif || null,
+    }).select().single();
+
+    if (error) { console.warn("[forum_replies insert]", error.message); return; }
+
+    // Use real DB ID so reactions can be matched on reload
     const newReply = {
-      id:`r${postId}_${Date.now()}`, postId,
-      user:currentUser.username, body, image, gif,
-      time:"just now",
+      id: saved.id, postId,
+      user: currentUser.username, body, image, gif,
+      time: "just now",
     };
     setReplies(prev=>({...prev,[postId]:[...(prev[postId]||[]),newReply]}));
+
+    // Increment reply_count in DB
+    await supabase.rpc("increment_reply_count", { post_id: postId }).catch(() => {
+      // Fallback: direct update if RPC doesn't exist
+      supabase.from("forum_posts").update({ reply_count: (supabase.raw?.("reply_count + 1") ?? undefined) }).eq("id", postId).catch(()=>{});
+    });
+
+    // Update local reply count
     setForumPosts(prev=>prev.map(p=>{
       if (p.id!==postId) return p;
       if (p.user !== currentUser.username) {
@@ -7431,17 +7457,8 @@ function App() {
           time:"just now", read:false,
         }, ...n]);
       }
-      return {...p, replies:p.replies+1};
+      return {...p, replies: (p.replies||0)+1};
     }));
-    // Persist to Supabase
-    const { data: { session: _sess } } = await supabase.auth.getSession(); const userId = _sess?.user?.id;
-    if (userId) {
-      await supabase.from("forum_replies").insert({
-        post_id: postId, user_id: userId,
-        username: currentUser.username, body,
-        image_url: image || null, gif_url: gif || null,
-      });
-    }
   }, [currentUser]);
 
   const handleReactPost = useCallback(async (targetId, emoji) => {
@@ -7496,9 +7513,15 @@ function App() {
       rich_text: post.richText || false,
       poll: post.poll || null,
     }).select().single();
-    // Don't add to forumPosts locally — real-time subscription handles it
-    // But we still need to navigate to the new post immediately
-    const finalPost = saved ? { ...post, id: saved.id, _created: saved.created_at } : post;
+
+    if (error) { console.warn("[forum_posts insert]", error.message); return; }
+
+    // Add to local state with real ID (realtime will dedup if it fires too)
+    const finalPost = { ...post, id: saved.id, _created: saved.created_at, replies: 0, views: 0 };
+    setForumPosts(prev => {
+      if (prev.some(p => p.id === saved.id)) return prev;
+      return [finalPost, ...prev];
+    });
     setActivePost(finalPost);
     setNewPostOpen(false);
     window.scrollTo({top:0,behavior:"smooth"});
